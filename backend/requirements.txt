@@ -1,0 +1,26 @@
+fastapi
+uvicorn
+python-dotenv
+
+# PDF processing
+pymupdf
+
+# Embeddings + LLM
+sentence_transformers
+
+# Vector DB
+weaviate-client
+
+# Hybrid search
+rank-bm25
+
+# Reranking
+cohere
+
+# Evaluation
+ragas
+
+# Utilities
+numpy
+pandas
+tqdm
