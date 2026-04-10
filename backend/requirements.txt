@@ -7,6 +7,9 @@ pymupdf
 
 # Embeddings + LLM
 sentence_transformers
+google.generativeai
+google-genai
+groq
 
 # Vector DB
 weaviate-client
@@ -24,3 +27,4 @@ ragas
 numpy
 pandas
 tqdm
+python-multipart

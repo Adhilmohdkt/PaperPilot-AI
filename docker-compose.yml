@@ -1,16 +1,44 @@
-version: '3.4'
 services:
   weaviate:
     image: semitechnologies/weaviate:latest
     ports:
       - "8080:8080"
+      - "50051:50051"
     environment:
       QUERY_DEFAULTS_LIMIT: 25
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
       PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
-      DEFAULT_VECTORIZER_MODULE: 'none'  # IMPORTANT
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      CLUSTER_HOSTNAME: 'node1'
+      CLUSTER_GOSSIP_BIND_PORT: "7100"
+      CLUSTER_DATA_BIND_PORT: "7101"
     volumes:
       - weaviate_data:/var/lib/weaviate
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - WEAVIATE_HOST=weaviate
+      # Define your API keys here! (Can also use an env_file)
+      # - COHERE_API_KEY=YOUR_KEY
+      # - GROQ_API_KEY=YOUR_KEY
+    volumes:
+      - ./Data:/app/Data
+      - ./backend/.env:/app/.env
+    depends_on:
+      - weaviate
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
 
 volumes:
   weaviate_data:
