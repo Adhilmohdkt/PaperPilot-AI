@@ -149,6 +149,7 @@ body {
   font-size: 1rem;
   line-height: 1.8;
   font-weight: 400;
+  white-space: pre-wrap;
 }
 
 /* Sources Layout */
@@ -381,6 +382,36 @@ body {
   display: flex;
   align-items: center;
   border: 1px solid var(--border-color);
+}
+
+.remove-document-btn {
+  margin-left: 12px;
+  padding: 5px 8px;
+  color: #fca5a5;
+  background: transparent;
+  border: 1px solid #7f1d1d;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.remove-document-btn:hover {
+  color: #fff;
+  border-color: #ef4444;
+}
+
+.section-label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-bottom: 15px;
+  letter-spacing: 1px;
+}
+
+.empty-history {
+  color: rgba(255,255,255,0.2);
+  font-style: italic;
+  font-size: 0.9rem;
 }
 
 .filter-dropdown {

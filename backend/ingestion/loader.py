@@ -1,8 +1,5 @@
-import fitz
+from langchain_community.document_loaders import PyMuPDFLoader
 
-def load_pdf(path):
-    doc = fitz.open(path)
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    return text
+def load_pdf(path: str):
+    loader = PyMuPDFLoader(path)
+    return loader.load()

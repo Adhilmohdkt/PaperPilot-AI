@@ -76,3 +76,26 @@ docker-compose up --build
 ```
 3. Once the terminal indicates that Uvicorn and Weaviate are running, open your browser and navigate to **http://localhost:3000**.
 4. Upload a document using the left sidebar and start researching!
+
+## Credit-safe paper library
+
+PaperPilot keeps the library intentionally small so embedding costs stay predictable.
+PDF files are used only during upload and then discarded; Weaviate stores the resulting
+semantic chunks. By default, the backend accepts at most **5 PDFs**, **25 pages per PDF**,
+and **40 chunks per PDF**. Duplicate uploads are rejected before any embedding API request.
+
+These optional `backend/.env` values adjust the guardrails:
+
+```env
+MAX_LIBRARY_DOCUMENTS=5
+MAX_PDF_PAGES=25
+MAX_CHUNKS_PER_DOCUMENT=40
+MAX_CHARS_PER_PAGE=12000
+GEMINI_MODEL=gemini-3.6-flash
+GEMINI_EMBEDDING_MODEL=models/gemini-embedding-2
+```
+
+Use **Remove paper** in the document selector to delete a paper's stored vectors and free
+space for another upload. When indexed evidence is insufficient, LangGraph performs a live
+search across academic sources and cites those temporary results without adding their PDFs
+or vectors to the library.

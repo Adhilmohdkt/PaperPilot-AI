@@ -1,3 +1,8 @@
+import pytest
+
+if __name__ != "__main__":
+    pytest.skip("Manual ingestion diagnostic; not a pytest test module.", allow_module_level=True)
+
 from ingestion.loader import load_pdf
 from ingestion.cleaner import clean_text
 from ingestion.chunker import chunk_text

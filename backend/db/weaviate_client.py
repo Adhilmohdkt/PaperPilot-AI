@@ -1,6 +1,7 @@
 import weaviate
 import os
 from weaviate.classes.query import Filter
+from config import settings
 
 def get_client():
     weaviate_host = os.getenv("WEAVIATE_HOST", "localhost")
@@ -19,7 +20,7 @@ def get_client():
 
 def search(query_text: str, query_vector: list, limit=15, source_filter: str = None):
     client = get_client()
-    collection = client.collections.get("PaperChunk")
+    collection = client.collections.get(settings.collection_name)
 
     filters = None
     if source_filter:
@@ -28,7 +29,7 @@ def search(query_text: str, query_vector: list, limit=15, source_filter: str = N
     response = collection.query.hybrid(
         query=query_text,
         vector=query_vector,
-        alpha=0.5,
+        alpha=settings.hybrid_alpha,
         filters=filters,
         limit=limit
     )

@@ -6,25 +6,25 @@ python-dotenv
 pymupdf
 
 # Embeddings + LLM
-sentence_transformers
-google.generativeai
-google-genai
-groq
+sentence-transformers
+langchain
+langchain-google-genai
 
 # Vector DB
 weaviate-client
 
-# Hybrid search
-rank-bm25
-
 # Reranking
 cohere
-
-# Evaluation
-ragas
 
 # Utilities
 numpy
 pandas
 tqdm
 python-multipart
+
+# LangChain document loading and text splitting
+langchain-community
+langchain-text-splitters
+
+# LangGraph workflow orchestrator
+langgraph

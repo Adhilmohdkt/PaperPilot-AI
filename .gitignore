@@ -5,3 +5,11 @@ node_modules/
 *.pyc
 Data/
 build/
+venv/
+__pycache__/
+.env
+node_modules/
+*.pyc
+Data/
+build/
+backend/*.db

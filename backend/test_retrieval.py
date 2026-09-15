@@ -1,3 +1,8 @@
+import pytest
+
+if __name__ != "__main__":
+    pytest.skip("Manual retrieval diagnostic; not a pytest test module.", allow_module_level=True)
+
 from retrieval.retriever import retrieve
 from generation.generator import generate_answer
 

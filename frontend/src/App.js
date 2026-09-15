@@ -1,293 +1,402 @@
-import React, { useState, useRef } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import "./App.css";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
+// ─── Backend helpers ─────────────────────────────────────────────────────────
+
+async function apiCreateConversation() {
+  const res = await fetch(`${API_URL}/conversations`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to create conversation");
+  return (await res.json()).conversation_id;
+}
+
+async function apiFetchConversations() {
+  const res = await fetch(`${API_URL}/conversations`);
+  if (!res.ok) throw new Error("Failed to fetch conversations");
+  return (await res.json()).conversations || [];
+}
+
+async function apiFetchConversation(convId) {
+  const res = await fetch(`${API_URL}/conversations/${convId}`);
+  if (!res.ok) throw new Error("Conversation not found");
+  return (await res.json()).messages || [];
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
 function App() {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [activeSession, setActiveSession] = useState(null); // { query, answer, sources }
+  // history is chronological: every turn remains rendered in the active chat.
   const [history, setHistory] = useState([]);
   const [uploadStatus, setUploadStatus] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
   const [availableDocs, setAvailableDocs] = useState([]);
   const fileInputRef = useRef(null);
+  const conversationEndRef = useRef(null);
 
-  const handleAsk = async (e) => {
-    if (e) e.preventDefault();
+  // conversationId = null means "no active conversation yet"
+  const [conversationId, setConversationId] = useState(null);
+  // conversationList = summaries from GET /conversations (for sidebar)
+  const [conversationList, setConversationList] = useState([]);
+
+  // ── Fetch sidebar list on mount ──────────────────────────────────────────
+  useEffect(() => {
+    apiFetchConversations()
+      .then(setConversationList)
+      .catch((e) => console.error("Bootstrap error:", e));
+  }, []);
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [history, isLoading]);
+
+  const refreshConversations = async () => {
+    try {
+      setConversationList(await apiFetchConversations());
+    } catch (e) {
+      console.error("Could not refresh conversations:", e);
+    }
+  };
+
+  // ── Load an existing conversation from the sidebar ───────────────────────
+  const loadConversation = async (convId) => {
+    try {
+      const messages = await apiFetchConversation(convId);
+      setConversationId(convId);
+      // Convert flat [user, assistant, …] into UI { query, answer } pairs
+      const msgs = [];
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (msg.role === "user") {
+          const next = messages[i + 1];
+          msgs.push({
+            query: msg.content,
+            answer: next && next.role === "assistant" ? next.content : "",
+            sources: [],
+          });
+        }
+      }
+      setHistory(msgs);
+    } catch (e) {
+      console.error("Failed to load conversation:", e);
+    }
+  };
+
+  // ── "New Chat" ───────────────────────────────────────────────────────────
+  const startNewChat = async () => {
+    try {
+      const newId = await apiCreateConversation();
+      setConversationId(newId);
+      setHistory([]);
+      await refreshConversations();
+    } catch (e) {
+      console.error("Failed to start new chat:", e);
+    }
+  };
+
+  // ── Send a message ───────────────────────────────────────────────────────
+  const handleAsk = async (event) => {
+    event?.preventDefault();
     if (!query.trim()) return;
 
     const currentQuery = query;
     setIsLoading(true);
     setQuery("");
-
-    // Convert history into a conversational array for the LLM context
-    const chatContext = history.slice(0, 4).reverse().flatMap(h => [
-      { role: "user", content: h.query },
-      { role: "assistant", content: h.answer || "" }
-    ]);
-    
-    // Optimistically set active session so we see the question immediately
-    setActiveSession({
-      query: currentQuery,
-      answer: "",
-      sources: []
-    });
+    const turnId = `${Date.now()}-${Math.random()}`;
+    const priorHistory = history;
+    setHistory((prev) => [...prev, { id: turnId, query: currentQuery, answer: "", sources: [] }]);
 
     try {
-      // Stage 1: Hit retrieval engine
-      const retrievePayload = { query: currentQuery };
-      if (activeFilter !== "all") {
-        retrievePayload.source_filter = activeFilter;
+      // Lazily create a conversation the first time a message is sent
+      let activeConvId = conversationId;
+      if (!activeConvId) {
+        activeConvId = await apiCreateConversation();
+        setConversationId(activeConvId);
+        await refreshConversations();
       }
-      
-      const retrieveResponse = await fetch(`${API_URL}/retrieve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(retrievePayload)
-      });
-      const retrieveData = await retrieveResponse.json();
-      const chunks = retrieveData.sources || [];
-      
-      // Update UI with the found citations instantly
-      setActiveSession(prev => ({ ...prev, sources: chunks }));
-      
-      // Stage 2: Stream the synthesized answer
-      const streamPayload = {
-        query: currentQuery, 
-        chunks: chunks,
-        history: chatContext
+
+      // Build context from the current in-memory history (last 4 turns)
+      const chatContext = priorHistory
+        .slice(-4)
+        .flatMap((item) => [
+          { role: "user", content: item.query },
+          { role: "assistant", content: item.answer || "" },
+        ]);
+
+      const payload = {
+        conversation_id: activeConvId,   // ← always the SAME id per chat
+        query: currentQuery,
+        history: chatContext,
       };
-      if (activeFilter !== "all") {
-        streamPayload.source_filter = activeFilter;
-      }
-      
-      const streamResponse = await fetch(`${API_URL}/stream`, {
+      if (activeFilter !== "all") payload.source_filter = activeFilter;
+
+      const response = await fetch(`${API_URL}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(streamPayload),
+        body: JSON.stringify(payload),
       });
 
-      const reader = streamResponse.body.getReader();
-      const decoder = new TextDecoder();
-      let answerText = "";
+      if (!response.ok || !response.body) {
+        let errorDetail = "";
+        try {
+          const errJson = await response.json();
+          errorDetail = errJson.detail
+            ? typeof errJson.detail === "string"
+              ? errJson.detail
+              : JSON.stringify(errJson.detail)
+            : errJson.message || "";
+        } catch {
+          try { errorDetail = await response.text(); } catch {}
+        }
+        throw new Error(
+          errorDetail
+            ? `Research service error (${response.status}): ${errorDetail}`
+            : `Research service is unavailable (HTTP ${response.status}).`
+        );
+      }
 
-      setIsLoading(false); // We are receiving tokens now, stop the thinking indicator
+      // ── SSE streaming ──────────────────────────────────────────────────
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let answer = "";
+      let sources = [];
+      let buffer = "";
+      let streamError = null;
+
+      const processEvent = (message) => {
+        let name = message.match(/^event: (.+)$/m)?.[1];
+        const raw = message.match(/^data: (.+)$/m)?.[1];
+        if (!raw) return;
+        let data;
+        try { data = JSON.parse(raw); } catch { return; }
+        if (!name && data?.event) name = data.event;
+        if (!name) return;
+        if (name === "sources") {
+          sources = data.sources || [];
+          setHistory((prev) => prev.map((turn) => turn.id === turnId ? { ...turn, sources } : turn));
+        }
+        if (name === "token") {
+          const text = typeof data.text === "string" ? data.text : (data.text?.text || "");
+          answer += text;
+          setIsLoading(false);
+          setHistory((prev) => prev.map((turn) => turn.id === turnId ? { ...turn, answer } : turn));
+        }
+        if (name === "error") streamError = data.message || "Research workflow failed.";
+      };
 
       while (true) {
         const { done, value } = await reader.read();
-        
         if (value) {
-          answerText += decoder.decode(value, { stream: true });
-          setActiveSession(prev => ({ ...prev, answer: answerText }));
+          buffer += decoder.decode(value, { stream: true });
+          const msgs = buffer.split("\n\n");
+          buffer = msgs.pop();
+          msgs.forEach(processEvent);
         }
-
-        if (done) {
-          // Ensure final text captures properly and add to React history block
-          setHistory(prev => [
-             { query: currentQuery, answer: answerText, sources: chunks }, 
-             ...prev
-          ]);
-          break;
-        }
+        if (done) break;
       }
 
+      if (streamError) throw new Error(streamError);
+
+      await refreshConversations();
     } catch (error) {
-      console.error("Error:", error);
-      setActiveSession({
-        query: currentQuery,
-        answer: "Connection failed. Ensure the FastAPI backend is running.",
-        sources: []
-      });
+      console.error(error);
+      setHistory((prev) => prev.map((turn) => turn.id === turnId ? {
+        ...turn,
+        answer: error.message || "Connection failed. Ensure the backend is running.",
+      } : turn));
+    } finally {
       setIsLoading(false);
     }
   };
 
-  const loadHistoryItem = (item) => {
-    setActiveSession(item);
-  };
-
-  const handleUpload = async (e) => {
-    const file = e.target.files[0];
+  // ── PDF upload ───────────────────────────────────────────────────────────
+  const handleUpload = async (event) => {
+    const file = event.target.files[0];
     if (!file) return;
-
     const formData = new FormData();
     formData.append("file", file);
-
-    setUploadStatus("Uploading...");
+    setUploadStatus("Indexing PDF...");
     try {
-      const response = await fetch(`${API_URL}/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
       const data = await response.json();
-      if (response.ok) {
-        setUploadStatus(`Success: Ingested ${data.chunks_inserted} chunks!`);
-        if (!availableDocs.includes(data.filename)) {
-          setAvailableDocs(prev => [...prev, data.filename]);
-        }
-        setActiveFilter(data.filename); // Auto-focus on the new file
-        setTimeout(() => setUploadStatus(""), 4000);
-      } else {
-        setUploadStatus(`Error: ${data.error}`);
-      }
-    } catch (err) {
-      setUploadStatus("Failed to connect to server.");
+      if (!response.ok) throw new Error(data.detail || data.error || "Upload failed.");
+      setUploadStatus(`Indexed ${data.chunks_inserted} semantic chunks`);
+      setAvailableDocs((prev) => prev.includes(data.filename) ? prev : [...prev, data.filename]);
+      setActiveFilter(data.filename);
+      setTimeout(() => setUploadStatus(""), 4000);
+    } catch (error) {
+      setUploadStatus(error.message || "Failed to upload PDF.");
     }
-    // reset file input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // ── Remove a document ────────────────────────────────────────────────────
+  const removeActiveDocument = async () => {
+    if (activeFilter === "all") return;
+    const documentName = activeFilter;
+    try {
+      const response = await fetch(
+        `${API_URL}/documents/${encodeURIComponent(documentName)}`,
+        { method: "DELETE" }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Could not remove this paper.");
+      setAvailableDocs((prev) => prev.filter((item) => item !== documentName));
+      setActiveFilter("all");
+      setUploadStatus(`Removed ${documentName} and its vectors`);
+      setTimeout(() => setUploadStatus(""), 4000);
+    } catch (error) {
+      setUploadStatus(error.message || "Could not remove this paper.");
+    }
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="app-layout">
-      
-      {/* Sidebar for History / Navigation */}
-      <div className="sidebar glass-panel">
+      <aside className="sidebar glass-panel">
         <h1 className="brand-title">PaperPilot</h1>
-        
+
+        {/* New Chat button */}
+        <button
+          className="new-chat-btn"
+          onClick={startNewChat}
+          style={{
+            marginBottom: "12px",
+            width: "100%",
+            padding: "8px 0",
+            cursor: "pointer",
+            borderRadius: "6px",
+            border: "1px solid rgba(255,255,255,0.3)",
+            background: "rgba(255,255,255,0.1)",
+            color: "inherit",
+            fontSize: "14px",
+          }}
+        >
+          + New Chat
+        </button>
+
         <div className="upload-section">
-          <input 
-            type="file" 
-            accept=".pdf" 
-            ref={fileInputRef} 
-            onChange={handleUpload} 
-            style={{ display: "none" }} 
-            id="file-upload" 
+          <input
+            id="file-upload"
+            type="file"
+            accept=".pdf"
+            ref={fileInputRef}
+            onChange={handleUpload}
+            style={{ display: "none" }}
           />
           <label htmlFor="file-upload" className="upload-btn">
-            {uploadStatus || "Upload PDF 📄"}
+            {uploadStatus || "Upload PDF"}
           </label>
         </div>
 
-        <div style={{color: "var(--text-muted)", fontSize: "0.8rem", marginBottom: "15px", letterSpacing: "1px"}}>
-          RECENT RESEARCH
-        </div>
-        
+        <div className="section-label">RECENT RESEARCH</div>
         <div className="history-list">
-          {history.length === 0 ? (
-            <div style={{color: "rgba(255,255,255,0.2)", fontStyle: "italic", fontSize: "0.9rem"}}>
-              No recent searches
-            </div>
-          ) : (
-            history.map((item, idx) => (
-              <div 
-                key={idx} 
-                className="history-item" 
-                onClick={() => loadHistoryItem(item)}
+          {conversationList.length ? (
+            conversationList.map((conv) => (
+              <button
+                key={conv.conversation_id}
+                className={`history-item${conv.conversation_id === conversationId ? " active" : ""}`}
+                onClick={() => loadConversation(conv.conversation_id)}
               >
-                {item.query}
-              </div>
+                {conv.last_query || "New conversation"}
+              </button>
             ))
+          ) : (
+            <div className="empty-history">No recent searches</div>
           )}
         </div>
-      </div>
+      </aside>
 
-      {/* Main Research Workspace */}
-      <div className="main-workspace">
-        
-        {/* Top Dock: Document Filter */}
+      <main className="main-workspace">
         <div className="top-dock glass-panel">
-           <span style={{fontSize: "0.85rem", color: "var(--text-muted)", marginRight: "10px"}}>Query Focus:</span>
-           <select 
-             className="filter-dropdown" 
-             value={activeFilter} 
-             onChange={(e) => setActiveFilter(e.target.value)}
-           >
-             <option value="all">🌐 Search All Documents</option>
-             {availableDocs.map((doc, idx) => (
-               <option key={idx} value={doc}>📄 {doc}</option>
-             ))}
-           </select>
+          <span>Query focus:</span>
+          <select
+            className="filter-dropdown"
+            value={activeFilter}
+            onChange={(e) => setActiveFilter(e.target.value)}
+          >
+            <option value="all">Search all documents</option>
+            {availableDocs.map((doc) => (
+              <option key={doc} value={doc}>{doc}</option>
+            ))}
+          </select>
+          {activeFilter !== "all" && (
+            <button className="remove-document-btn" type="button" onClick={removeActiveDocument}>
+              Remove paper
+            </button>
+          )}
         </div>
 
-        <div className="content-display">
-          {!activeSession && !isLoading ? (
+        <section className="content-display">
+          {history.length === 0 && !isLoading ? (
             <div className="hero-state">
               <h2 className="hero-title">Unlock Your Documents</h2>
               <p className="hero-subtitle">
-                Ask profound questions, discover hidden insights, and instantly review source citations drawn directly from your knowledge base.
+                Ask focused questions and get source-backed answers from your papers or live research.
               </p>
             </div>
           ) : (
             <>
-              {/* Question & Answer Area */}
-              <div className="qa-container">
-                <div className="user-query">{activeSession?.query}</div>
-                
-                {isLoading && !activeSession?.answer ? (
-                  <div className="thinking-indicator">
-                    <span>Synthesizing intelligence</span>
-                    <div className="dot"></div>
-                    <div className="dot"></div>
-                    <div className="dot"></div>
+              {history.map((turn, turnIndex) => (
+                <React.Fragment key={turn.id || `${turn.query}-${turnIndex}`}>
+                  <div className="qa-container">
+                    <div className="user-query">{turn.query}</div>
+                    {isLoading && turnIndex === history.length - 1 && !turn.answer ? (
+                      <div className="thinking-indicator">Searching papers and synthesizing evidence...</div>
+                    ) : (
+                      <div className="ai-answer">{turn.answer}</div>
+                    )}
                   </div>
-                ) : (
-                  <div className="ai-answer">
-                    {activeSession?.answer}
-                  </div>
-                )}
-              </div>
-
-              {/* Source Materials Grid */}
-              {activeSession?.sources && activeSession.sources.length > 0 && !isLoading && (
-                <div className="sources-section">
-                  <div className="sources-title">Source Materials Used</div>
+                  {turn.sources?.length > 0 && !(isLoading && turnIndex === history.length - 1) && (
+                    <div className="sources-section">
+                  <div className="sources-title">Source materials used</div>
                   <div className="sources-grid">
-                    {activeSession.sources.map((src, index) => {
-                      const pdfUrl = src.source ? `${API_URL}/pdfs/${encodeURIComponent(src.source)}` : "#";
+                    {turn.sources.map((source, index) => {
+                      const live = /^https?:\/\//.test(source.source || "");
                       return (
                         <div className="source-card" key={index}>
                           <div className="source-actions">
-                            <a 
-                              href={pdfUrl} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="source-badge"
-                            >
-                              <span role="img" aria-label="file">📄</span> {src.source || "Unknown Source"}
-                            </a>
-                            {src.source && (
-                              <a 
-                                href={pdfUrl} 
-                                download={src.source}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="download-btn"
-                                title="Download PDF"
-                              >
-                                📥 Download
+                            {live ? (
+                              <a href={source.source} target="_blank" rel="noreferrer" className="source-badge">
+                                {source.kind === "academic" ? "Paper" : "Live"}: {source.title || source.source}
                               </a>
+                            ) : (
+                              <span className="source-badge">
+                                PDF: {source.source || "Unknown"}{source.page ? ` · page ${source.page}` : ""}
+                              </span>
                             )}
                           </div>
-                          <div className="source-text">{src.text || src}</div>
+                          <div className="source-text">{source.text}</div>
                         </div>
                       );
                     })}
                   </div>
-                </div>
-              )}
+                    </div>
+                  )}
+                </React.Fragment>
+              ))}
+              <div ref={conversationEndRef} />
             </>
           )}
-        </div>
+        </section>
 
-        {/* Persistent Input Bar */}
         <div className="input-dock">
           <form className="search-box" onSubmit={handleAsk}>
             <input
-              type="text"
               className="search-input"
-              placeholder="Ask your query (e.g., 'What is RAG?')"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               disabled={isLoading}
+              placeholder="Ask a question about your research"
             />
-            <button type="submit" className="ask-btn" disabled={isLoading || !query.trim()}>
-              {isLoading ? "Searching..." : "Analyze"}
+            <button className="ask-btn" type="submit" disabled={isLoading || !query.trim()}>
+              {isLoading ? "Researching..." : "Analyze"}
             </button>
           </form>
         </div>
-      </div>
-      
+      </main>
     </div>
   );
 }

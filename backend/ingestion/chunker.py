@@ -1,9 +1,13 @@
-def chunk_text(text, size=400, overlap=80):
-    words = text.split()
-    chunks = []
+"""Chunk LangChain Documents while preserving their citation metadata."""
+from typing import List
 
-    for i in range(0, len(words), size - overlap):
-        chunk = " ".join(words[i:i+size])
-        chunks.append(chunk)
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-    return chunks
+
+def chunk_documents(documents: List) -> List:
+    """Create deterministic chunks without making extra embedding API calls."""
+    return RecursiveCharacterTextSplitter(
+        chunk_size=1200,
+        chunk_overlap=150,
+        add_start_index=True,
+    ).split_documents(documents)
