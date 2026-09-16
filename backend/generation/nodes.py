@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
+from pydantic import BaseModel, Field
 
 import asyncio
 
@@ -22,59 +23,188 @@ _llm = ChatGroq(
     model_name="openai/gpt-oss-20b",
     temperature=0.2,
 )
+class QueryUnderstanding(BaseModel):
+    """Structured interpretation of a PaperPilot user query."""
 
+    intent: Literal[
+        "general_answer",
+        "local_rag",
+        "academic_research",
+    ] = Field(
+        description=(
+            "The route PaperPilot should use. "
+            "'academic_research' means the user wants external academic papers, "
+            "research discovery, literature search, or paper recommendations. "
+            "'local_rag' means the user explicitly wants information from their "
+            "uploaded/local document library. "
+            "'general_answer' means the user is asking a normal explanatory or "
+            "conversational question."
+        )
+    )
+
+    topic: Optional[str] = Field(
+        default=None,
+        description="The main research topic or subject in the user's query.",
+    )
+
+    search_query: str = Field(
+        description=(
+            "A concise search query for academic retrieval. "
+            "Extract only the core research topic or keywords. "
+            "Remove conversational phrases such as 'find papers', "
+            "'can you retrieve', 'show me', or 'I am looking for'. "
+            "Correct obvious spelling mistakes while preserving the user's meaning. "
+            "For example, 'can you retrive most relevant pappers about agntic ai' "
+            "should produce 'agentic AI'."
+        ),
+    )
+
+    recency_requested: bool = Field(
+        default=False,
+        description=(
+            "Whether the user asks for recent, latest, new, or current research."
+        ),
+    )
 
 async def query_understanding_node(state: AgentState) -> Dict[str, Any]:
-    """Understand the user query and extract structured intent.
+    """Understand the query using LangChain structured output.
 
-    Determines the intent/route for the query using pattern-based classification
-    for reliable routing.
-
-    Sets:
-        intent: one of "general_answer", "local_rag", "academic_research"
+    The LLM is the primary semantic classifier.
+    A deterministic fallback is used only if structured classification fails.
     """
-    query = state.get("user_query", "")
 
-    # Pattern-based classification for reliable routing
-    normalized = re.sub(r"[^a-z0-9\s]", "", query.lower()).strip()
+    query = (state.get("user_query") or state.get("query") or "").strip()
 
-    # Academic research keywords
-    academic_keys = {
-        "find", "search", "papers", "article", "study", "research",
-        "evaluation", "benchmark", "comparison", "survey",
-    }
-    # Local RAG keywords (references to the user's PDF library)
-    local_keys = {
-        "pdf", "library", "document", "my papers", "my library",
-        "local", "uploaded",
-    }
-    # Casual/conversational keywords
-    casual_keys = {
-        "hello", "hi", "how are you", "good morning", "good afternoon",
-        "good evening", "thank you", "thanks", "hey", "hey there",
-        "bye", "goodbye", "chat", "conversation",
-    }
+    if not query:
+        return {
+            "intent": "general_answer",
+            "route": "general_answer",
+            "query_topic": None,
+            "search_query": "",
+            "recency_requested": False,
+        }
 
-    # Count matches in each category
-    academic_score = sum(1 for kw in academic_keys if kw in normalized)
-    local_score = sum(1 for kw in local_keys if kw in normalized)
-    casual_score = sum(1 for kw in casual_keys if kw in normalized)
+    classifier = _llm.with_structured_output(QueryUnderstanding)
 
-    # Determine intent based on highest score, with tiebreaking
-    if casual_score > 0 and (academic_score == 0 and local_score == 0):
-        intent = "general_answer"
-    elif academic_score > local_score and academic_score > 0:
-        intent = "academic_research"
-    elif local_score > 0:
-        intent = "local_rag"
-    elif academic_score > 0:
-        intent = "academic_research"
-    else:
-        intent = "general_answer"
+    prompt = f"""
+You are the query-understanding component of PaperPilot, an academic
+research assistant.
 
-    return {"intent": intent}
+Classify the user's intent into exactly one of these routes:
 
+1. academic_research
+Use this when the user wants to:
+- find, retrieve, search for, discover, or recommend academic papers
+- find research, studies, surveys, benchmarks, or literature
+- get recent/latest/new papers on a topic
+- compare or discover external academic research
 
+Minor spelling mistakes must NOT prevent academic routing.
+For example, "retrive pappers about agntic ai" still means
+academic_research.
+
+2. local_rag
+Use this ONLY when the user explicitly refers to their uploaded/local
+documents, PDFs, papers, or library.
+
+3. general_answer
+Use this for explanations, definitions, conversation, or questions that
+do not request paper discovery and do not explicitly request the local
+library.
+
+For academic_research, also create a concise search_query for academic
+databases.
+
+search_query rules:
+- Keep only the core research topic or keywords.
+- Remove conversational phrases such as "find papers", "can you retrieve",
+  "show me", or "I am looking for".
+- Correct obvious spelling mistakes.
+- Preserve the intended meaning.
+- Do not include instructions or conversational wording.
+
+Examples:
+
+"can you retrive most relevant pappers about agntic ai"
+-> search_query: "agentic AI"
+
+"find recent papers about retrieval augmented generation"
+-> search_query: "retrieval augmented generation"
+
+"show me papers on hallucination detection in LLMs"
+-> search_query: "hallucination detection LLMs"
+
+Important distinction:
+
+"What is RAG?"
+-> general_answer
+
+"Find papers about RAG"
+-> academic_research
+
+"What does my uploaded paper say about RAG?"
+-> local_rag
+
+User query:
+{query}
+"""
+
+    try:
+        result = await classifier.ainvoke(prompt)
+
+        return {
+            "intent": result.intent,
+            "route": result.intent,
+            "query_topic": result.topic,
+            "search_query": result.search_query,
+            "recency_requested": result.recency_requested,
+        }
+
+    except Exception:
+        # Deterministic fallback only if LLM structured classification fails.
+        normalized = re.sub(r"[^a-z0-9\s]", " ", query.lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        local_patterns = (
+            "my pdf",
+            "my document",
+            "my documents",
+            "my paper",
+            "my papers",
+            "my library",
+            "uploaded",
+            "local library",
+        )
+
+        academic_patterns = (
+            "paper",
+            "papers",
+            "research",
+            "study",
+            "studies",
+            "literature",
+            "survey",
+            "benchmark",
+            "arxiv",
+            "academic",
+        )
+
+        if any(pattern in normalized for pattern in local_patterns):
+            intent = "local_rag"
+        elif any(pattern in normalized for pattern in academic_patterns):
+            intent = "academic_research"
+        else:
+            intent = "general_answer"
+
+        return {
+            "intent": intent,
+            "route": intent,
+            "query_topic": None,
+            "search_query": query,
+            "recency_requested": bool(
+                re.search(r"\b(recent|latest|new|current)\b", normalized)
+            ),
+        }
 async def router_node(state: AgentState) -> Dict[str, Any]:
     """Route the query to the appropriate path based on understood intent.
 
@@ -160,18 +290,41 @@ async def academic_search_node(state: AgentState) -> Dict[str, Any]:
     from retrieval.academic.openalex_provider import OpenAlexProvider
     from config import settings
 
-    query = state.get("user_query") or state.get("query", "")
+    query = (
+        state.get("search_query")
+        or state.get("query_topic")
+        or state.get("user_query")
+        or state.get("query", "")
+    )
+
     max_results = settings.academic_search_max_results
 
-    # Both providers are independently awaited. A timeout/failure in one must
-    # not discard results returned by the other.
+    # Both providers are independently awaited. A timeout/failure in one
+    # must not discard results returned by the other.
     results = await asyncio.gather(
-        ArxivProvider().search(query, max_results=max_results),
-        OpenAlexProvider().search(query, max_results=max_results),
+        ArxivProvider().search(
+            query,
+            max_results=max_results,
+        ),
+        OpenAlexProvider().search(
+            query,
+            max_results=max_results,
+        ),
         return_exceptions=True,
     )
-    arxiv_papers = results[0] if isinstance(results[0], list) else []
-    openalex_papers = results[1] if isinstance(results[1], list) else []
+
+    arxiv_papers = (
+        results[0]
+        if isinstance(results[0], list)
+        else []
+    )
+
+    openalex_papers = (
+        results[1]
+        if isinstance(results[1], list)
+        else []
+    )
+
     all_papers = arxiv_papers + openalex_papers
 
     return {

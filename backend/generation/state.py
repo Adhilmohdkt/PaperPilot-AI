@@ -25,6 +25,8 @@ class AgentState(TypedDict, total=False):
     citations: List[Dict[str, Any]]
     response: str
     error: str
+    search_query: str
+    query_topic: Optional[str]
 
 
 def create_initial_state(
@@ -35,18 +37,19 @@ def create_initial_state(
 ) -> AgentState:
     """Create a complete, API-safe initial graph state."""
     return {
-        "conversation_id": conversation_id,
-        "query": query,
-        "user_query": query,
-        "source_filter": source_filter,
-        "messages": history or [],
-        "intent": "general_answer",
-        "route": "general_answer",
-        "final_docs": [],
-        "academic_papers": [],
-        "ranked_papers": [],
-        "normalized_papers": [],
-        "paper_content_texts": [],
-        "citations": [],
-        "response": "",
-    }
+    "conversation_id": conversation_id,
+    "query": query,
+    "user_query": query,
+    "search_query": "",
+    "source_filter": source_filter,
+    "messages": history or [],
+    "intent": "general_answer",
+    "route": "general_answer",
+    "final_docs": [],
+    "academic_papers": [],
+    "ranked_papers": [],
+    "normalized_papers": [],
+    "paper_content_texts": [],
+    "citations": [],
+    "response": "",
+}
