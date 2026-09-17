@@ -1,20 +1,29 @@
-"""Generation module for the PaperPilot Phase 2 workflow.
+"""Answer generation for the PaperPilot LangGraph workflow.
 
-Provides answer generation using Groq through LangChain ChatGroq,
-with citation-aware prompt engineering that distinguishes between
-local library sources ([Source N]) and academic papers ([Paper N]).
+Uses Groq through LangChain ChatGroq for answer generation.
+Gemini is reserved for embeddings elsewhere in the application.
 
-Also provides a streaming generation function for the Phase 1 chat endpoint.
+The generator supports:
+- General conversational answers
+- Local library RAG answers
+- Academic research answers
+- Conversation history
+- Citation-aware responses
+- Deterministic citation validation
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Iterable
+import re
+from typing import Any, Dict, List, Optional
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_groq import ChatGroq
 
 
@@ -24,101 +33,227 @@ async def generate_answer(
     citations: Optional[List[Dict[str, Any]]] = None,
     intent: Optional[str] = None,
     history: Optional[List[Any]] = None,
+    paper_content_texts: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Generate the final answer using the Groq LLM, grounded in retrieved context.
-
-    Distinguishes between local library sources ([Source N]) and academic papers ([Paper N]).
-    For general_answer intent, provides direct generation without requiring retrieval evidence.
+    """Generate the final answer using Groq through LangChain.
 
     Args:
-        query: The user's original question.
-        final_docs: Document chunks used as context, each with a "kind" field
-            ("library" for local papers, "academic" for academic papers).
-        citations: Citation validation results from citation_validation_node.
-        intent: The determined intent/route (e.g., "general_answer", "local_rag", "academic_research").
-        history: Prior conversation messages for multi-turn context.
+        query:
+            The user's current question.
+
+        final_docs:
+            Retrieved context. Each document should contain a ``kind`` field:
+            - ``library`` for local RAG sources
+            - ``academic`` for academic papers
+
+        citations:
+            Existing citation validation results from the workflow.
+
+        intent:
+            Current workflow intent:
+            - ``general_answer``
+            - ``local_rag``
+            - ``academic_research``
+
+        history:
+            Previous conversation turns represented as dictionaries or
+            LangChain BaseMessage objects.
+
+        paper_content_texts:
+            Temporary question-relevant content retrieved from public
+            academic PDFs. This content is used only for the current
+            generation request and is never permanently indexed.
 
     Returns:
-        Dict with "answer" (str) and "citations" (list of citation dicts).
+        A dictionary containing:
+        - ``answer``: generated answer text
+        - ``citations``: validated citation records
     """
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
+
+    # ------------------------------------------------------------------
+    # Configuration
+    # ------------------------------------------------------------------
+
+    if not os.getenv("GROQ_API_KEY"):
         raise RuntimeError("GROQ_API_KEY is not configured.")
 
     if citations is None:
         citations = []
+
+    if paper_content_texts is None:
+        paper_content_texts = []
 
     model = ChatGroq(
         model_name="openai/gpt-oss-20b",
         temperature=0.2,
     )
 
+    # ------------------------------------------------------------------
+    # General conversational path
+    # ------------------------------------------------------------------
+
     if intent == "general_answer":
-        system_msg = (
-            "You are PaperPilot, a knowledgeable and precise AI research assistant. "
-            "Answer the user's question directly, clearly, and accurately."
+        system_message = SystemMessage(
+            content=(
+                "You are PaperPilot, a knowledgeable and precise AI research "
+                "assistant. Answer the user's question directly, clearly, "
+                "and accurately. Use the previous conversation when it is "
+                "relevant to the current question."
+            )
         )
-        messages: List[BaseMessage] = [SystemMessage(content=system_msg)]
-        for msg in (history or []):
-            if isinstance(msg, dict):
-                role = msg.get("role")
-                content = msg.get("content", "")
-                if role == "user":
-                    messages.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    messages.append(AIMessage(content=content))
-            elif isinstance(msg, BaseMessage):
-                messages.append(msg)
+
+        messages: List[BaseMessage] = [system_message]
+
+        messages.extend(_convert_history_to_messages(history))
+
+        # Add the current question exactly once.
         messages.append(HumanMessage(content=query))
+
         response = await model.ainvoke(messages)
-        answer = response.content if hasattr(response, "content") else str(response)
+
+        answer = _extract_response_text(response)
+
         return {
             "answer": answer,
             "citations": [],
         }
 
-    # Separate library and academic sources
-    library_chunks = [d for d in final_docs if d.get("kind") == "library"]
-    academic_entries = [d for d in final_docs if d.get("kind") == "academic"]
+    # ------------------------------------------------------------------
+    # Separate retrieved evidence
+    # ------------------------------------------------------------------
 
-    # Build library context using [Source N] format
+    library_chunks = [
+        document
+        for document in final_docs
+        if document.get("kind") == "library"
+    ]
+
+    academic_entries = [
+        document
+        for document in final_docs
+        if document.get("kind") == "academic"
+    ]
+
+    # ------------------------------------------------------------------
+    # Build local-library context
+    # ------------------------------------------------------------------
+
     library_parts: List[str] = []
-    for i, chunk in enumerate(library_chunks, start=1):
-        text = chunk.get("text", "")
-        library_parts.append(f"[Source {i}]: {text}")
 
-    # Build academic context using [Paper N] format
-    academic_parts: List[str] = []
-    for i, entry in enumerate(academic_entries, start=1):
-        paper = entry if isinstance(entry, dict) else {}
-        if not paper:
+    for index, chunk in enumerate(library_chunks, start=1):
+        text = chunk.get("text", "").strip()
+
+        if not text:
             continue
-        parts: List[str] = [f"[Paper {i}]"]
-        if paper.get("title"):
-            parts.append(f"Title: {paper.get('title')}")
-        if paper.get("authors"):
-            authors = paper.get("authors", [])
-            if authors:
-                parts.append(f"Authors: {', '.join(authors)}")
-        if paper.get("year"):
-            parts.append(f"Year: {paper.get('year')}")
-        if paper.get("abstract"):
-            abstract = paper.get("abstract", "")
-            parts.append(f"Abstract: {abstract[:400]}")
-        if paper.get("doi"):
-            parts.append(f"DOI: {paper.get('doi')}")
-        if paper.get("paper_url"):
-            parts.append(f"URL: {paper.get('paper_url')}")
-        if paper.get("arxiv_id"):
-            parts.append(f"arXiv: {paper.get('arxiv_id')}")
-        academic_parts.append(" ".join(parts))
 
-    library_context = "\n\n".join(library_parts) if library_parts else ""
-    academic_context = "\n\n".join(academic_parts) if academic_parts else ""
+        library_parts.append(
+            f"[Source {index}]: {text}"
+        )
 
-    # Combine contexts
+    library_context = "\n\n".join(library_parts)
+
+    # ------------------------------------------------------------------
+    # Build academic-paper context
+    # ------------------------------------------------------------------
+
+    academic_parts: List[str] = []
+
+    for index, paper in enumerate(academic_entries, start=1):
+        if not isinstance(paper, dict):
+            continue
+
+        parts: List[str] = [f"[Paper {index}]"]
+
+        title = paper.get("title")
+        if title:
+            parts.append(f"Title: {title}")
+
+        authors = paper.get("authors")
+        if authors:
+            if isinstance(authors, list):
+                parts.append(
+                    f"Authors: {', '.join(str(author) for author in authors)}"
+                )
+            else:
+                parts.append(f"Authors: {authors}")
+
+        year = paper.get("year")
+        if year:
+            parts.append(f"Year: {year}")
+
+        publication_date = paper.get("publication_date")
+        if publication_date:
+            parts.append(
+                f"Publication date: {publication_date}"
+            )
+
+        abstract = paper.get("abstract")
+        if abstract:
+            # Keep academic metadata context compact.
+            parts.append(
+                f"Abstract: {str(abstract)[:400]}"
+            )
+
+        doi = paper.get("doi")
+        if doi:
+            parts.append(f"DOI: {doi}")
+
+        paper_url = paper.get("paper_url")
+        if paper_url:
+            parts.append(f"URL: {paper_url}")
+
+        pdf_url = paper.get("pdf_url")
+        if pdf_url:
+            parts.append(f"PDF: {pdf_url}")
+
+        arxiv_id = paper.get("arxiv_id")
+        if arxiv_id:
+            parts.append(f"arXiv: {arxiv_id}")
+
+        openalex_id = paper.get("openalex_id")
+        if openalex_id:
+            parts.append(f"OpenAlex: {openalex_id}")
+
+        academic_parts.append("\n".join(parts))
+
+    # ------------------------------------------------------------------
+    # Add temporary PDF content to the corresponding academic paper.
+    # ------------------------------------------------------------------
+
+    for paper_content in paper_content_texts:
+        if not isinstance(paper_content, dict):
+            continue
+
+        title = paper_content.get("title")
+        content = paper_content.get("content")
+
+        if not title or not content:
+            continue
+
+        for index, paper in enumerate(academic_entries):
+            if not isinstance(paper, dict):
+                continue
+
+            if paper.get("title") != title:
+                continue
+
+            academic_parts[index] += (
+                "\n\nRelevant PDF content:\n"
+                f"{content}"
+            )
+
+            break
+
+    academic_context = "\n\n".join(academic_parts)
+
+    # ------------------------------------------------------------------
+    # Combine retrieved context
+    # ------------------------------------------------------------------
+
     if library_context and academic_context:
-        full_context = f"{library_context}\n\n{academic_context}"
+        full_context = (
+            f"{library_context}\n\n{academic_context}"
+        )
     elif library_context:
         full_context = library_context
     elif academic_context:
@@ -126,92 +261,70 @@ async def generate_answer(
     else:
         full_context = "No retrieved evidence was found."
 
-    # Prepare messages for the LLM
-    system_msg = (
-        "You are PaperPilot, a precise research assistant. "
-        "Answer only from the retrieved evidence. Use inline citations "
-        "in the form [Source N] for factual claims from the user's library, "
-        "and [Paper N] for academic papers. If evidence is insufficient, "
-        "say so clearly. Distinguish between [Source N] and [Paper N] "
-        "formats. Do not fabricate page numbers or DOIs for academic papers."
+    # ------------------------------------------------------------------
+    # RAG / academic research system prompt
+    # ------------------------------------------------------------------
+
+    system_message = SystemMessage(
+        content=(
+            "You are PaperPilot, a precise AI research assistant.\n\n"
+            "Answer the user's question using the retrieved evidence "
+            "provided in the conversation.\n\n"
+            "Citation rules:\n"
+            "- Use [Source N] for factual claims supported by the user's "
+            "local library documents.\n"
+            "- Use [Paper N] for factual claims supported by academic "
+            "papers returned by the research providers.\n"
+            "- Do not invent citations.\n"
+            "- Do not fabricate page numbers, DOIs, URLs, authors, or "
+            "publication details.\n"
+            "- If the retrieved evidence is insufficient, say so clearly.\n"
+            "- Do not present unsupported information as if it came from "
+            "the retrieved evidence.\n"
+            "- Distinguish clearly between local sources and academic papers."
+        )
     )
 
-    user_msg_content = query
+    messages: List[BaseMessage] = [system_message]
 
-    # Build the message list
-    messages: List[BaseMessage] = [SystemMessage(content=system_msg)]
-    for msg in (history or []):
-        if isinstance(msg, dict):
-            role = msg.get("role")
-            content = msg.get("content", "")
-            if role == "user":
-                messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                messages.append(AIMessage(content=content))
-        elif isinstance(msg, BaseMessage):
-            messages.append(msg)
+    # Previous conversation is context, not the current user query.
+    messages.extend(_convert_history_to_messages(history))
 
-    # Add the user query
-    messages.append(HumanMessage(content=user_msg_content))
+    # ------------------------------------------------------------------
+    # Current question + retrieved evidence
+    #
+    # IMPORTANT:
+    # The current question is included only once.
+    # ------------------------------------------------------------------
 
-    # Add context as a user message postscript
-    full_user_message = f"{full_context}\n\nUser question: {user_msg_content}" if full_context else user_msg_content
-    messages.append(HumanMessage(content=full_user_message))
+    user_message = (
+        "Retrieved evidence:\n\n"
+        f"{full_context}\n\n"
+        "Current user question:\n"
+        f"{query}"
+    )
 
-    # Generate using Groq (async)
+    messages.append(
+        HumanMessage(content=user_message)
+    )
+
+    # ------------------------------------------------------------------
+    # Generate answer
+    # ------------------------------------------------------------------
+
     response = await model.ainvoke(messages)
 
-    answer = response.content if hasattr(response, "content") else str(response)
+    answer = _extract_response_text(response)
 
-    # Deterministic citation validation (no LLM)
-    import re
+    # ------------------------------------------------------------------
+    # Deterministic citation validation
+    # ------------------------------------------------------------------
 
-    validated_citations: List[Dict[str, Any]] = []
-
-    # Extract [Source N] references from the answer
-    source_refs = re.findall(r"\[Source (\d+)\]", answer)
-
-    # Extract [Paper N] references from the answer
-    paper_refs = re.findall(r"\[Paper (\d+)\]", answer)
-
-    # Validate [Source N] references
-    source_entries = {str(i + 1): doc for i, doc in enumerate(final_docs) if doc.get("kind") == "library"}
-    for ref_num in source_refs:
-        if ref_num in source_entries:
-            validated_citations.append({
-                "source": f"Source {ref_num}",
-                "valid": True,
-                "details": "Library source exists in context",
-            })
-        else:
-            validated_citations.append({
-                "source": f"Source {ref_num}",
-                "valid": False,
-                "details": "Library source not found in context",
-            })
-
-    # Validate [Paper N] references
-    academic_entries = [d for d in final_docs if d.get("kind") == "academic"]
-    for ref_num in paper_refs:
-        idx = int(ref_num) - 1  # 0-based index
-        if 0 <= idx < len(academic_entries):
-            validated_citations.append({
-                "source": f"Paper {ref_num}",
-                "valid": True,
-                "details": "Academic paper exists in context",
-            })
-        else:
-            validated_citations.append({
-                "source": f"Paper {ref_num}",
-                "valid": False,
-                "details": "Academic paper not found in context",
-            })
-
-    # Append any existing citations from the state
-    for existing in citations:
-        # Avoid duplicates
-        if existing not in validated_citations:
-            validated_citations.append(existing)
+    validated_citations = validate_citations(
+        answer=answer,
+        final_docs=final_docs,
+        existing_citations=citations,
+    )
 
     return {
         "answer": answer,
@@ -219,35 +332,171 @@ async def generate_answer(
     }
 
 
-def generate_answer_stream(
-    query: str,
-    chunks: List[Dict[str, Any]],
-    history: List[Dict[str, str]] | None = None,
-) -> Iterable[str]:
-    """Yield answer text while keeping citations tied to supplied retrieved evidence.
+def _convert_history_to_messages(
+    history: Optional[List[Any]],
+) -> List[BaseMessage]:
+    """Convert stored conversation history into LangChain messages.
 
-    Uses Gemini embeddings and is kept for Phase 1 chat/streaming compatibility.
+    Supports both:
+    - dictionaries: {"role": "...", "content": "..."}
+    - existing LangChain BaseMessage objects
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    from langchain_core.output_parsers import StrOutputParser
+    messages: List[BaseMessage] = []
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are PaperPilot, a precise research assistant. Answer only from the retrieved evidence.
-Use inline citations in the form [Source N] for factual claims. If evidence is insufficient, say so clearly.
+    for message in history or []:
 
-Retrieved evidence:
-{context}"""),
-        ("human", "{query}"),
-    ])
-    model = ChatGoogleGenerativeAI(
-        model=os.getenv("GEMINI_MODEL", "gemini-embedding-2-preview"),
-        google_api_key=api_key,
-        temperature=0.2,
-        streaming=True,
+        if isinstance(message, BaseMessage):
+            messages.append(message)
+            continue
+
+        if not isinstance(message, dict):
+            continue
+
+        role = message.get("role")
+        content = message.get("content", "")
+
+        if not content:
+            continue
+
+        if role == "user":
+            messages.append(
+                HumanMessage(content=str(content))
+            )
+
+        elif role == "assistant":
+            messages.append(
+                AIMessage(content=str(content))
+            )
+
+    return messages
+
+
+def _extract_response_text(response: Any) -> str:
+    """Extract plain text from a LangChain model response."""
+
+    content = getattr(response, "content", None)
+
+    if content is None:
+        return str(response)
+
+    if isinstance(content, str):
+        return content
+
+    # Some LangChain model responses can contain structured content blocks.
+    if isinstance(content, list):
+        text_parts: List[str] = []
+
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+
+            elif isinstance(block, dict):
+                text = block.get("text")
+
+                if text:
+                    text_parts.append(str(text))
+
+        if text_parts:
+            return "".join(text_parts)
+
+    return str(content)
+
+
+def validate_citations(
+    answer: str,
+    final_docs: List[Dict[str, Any]],
+    existing_citations: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Validate [Source N] and [Paper N] references deterministically."""
+
+    validated_citations: List[Dict[str, Any]] = []
+
+    existing_citations = existing_citations or []
+
+    # --------------------------------------------------------------
+    # Library sources
+    # --------------------------------------------------------------
+
+    source_entries = {
+        str(index): document
+        for index, document in enumerate(
+            (
+                document
+                for document in final_docs
+                if document.get("kind") == "library"
+            ),
+            start=1,
+        )
+    }
+
+    source_refs = re.findall(
+        r"\[Source\s+(\d+)\]",
+        answer,
     )
-    chain = prompt | model | StrOutputParser()
-    yield from chain.stream({"query": query, "context": _context(chunks)})
+
+    for reference_number in source_refs:
+
+        if reference_number in source_entries:
+            validated_citations.append(
+                {
+                    "source": f"Source {reference_number}",
+                    "valid": True,
+                    "details": "Library source exists in context",
+                }
+            )
+        else:
+            validated_citations.append(
+                {
+                    "source": f"Source {reference_number}",
+                    "valid": False,
+                    "details": "Library source not found in context",
+                }
+            )
+
+    # --------------------------------------------------------------
+    # Academic papers
+    # --------------------------------------------------------------
+
+    academic_entries = [
+        document
+        for document in final_docs
+        if document.get("kind") == "academic"
+    ]
+
+    paper_refs = re.findall(
+        r"\[Paper\s+(\d+)\]",
+        answer,
+    )
+
+    for reference_number in paper_refs:
+
+        index = int(reference_number) - 1
+
+        if 0 <= index < len(academic_entries):
+            validated_citations.append(
+                {
+                    "source": f"Paper {reference_number}",
+                    "valid": True,
+                    "details": "Academic paper exists in context",
+                }
+            )
+        else:
+            validated_citations.append(
+                {
+                    "source": f"Paper {reference_number}",
+                    "valid": False,
+                    "details": "Academic paper not found in context",
+                }
+            )
+
+    # --------------------------------------------------------------
+    # Preserve citations already produced by the workflow
+    # --------------------------------------------------------------
+
+    for existing in existing_citations:
+
+        if existing not in validated_citations:
+            validated_citations.append(existing)
+
+    return validated_citations

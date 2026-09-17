@@ -252,8 +252,23 @@ async def chat_stream(request: ChatRequest):
     async def event_generator():
         try:
             # Run the LangGraph workflow with streaming
-            config = {"configurable": {"thread_id": conv_id}}
-
+            # Run the LangGraph workflow with explicit LangSmith metadata
+            config = {
+                "run_name": "PaperPilot Chat",
+                "tags": [
+                    "paperpilot",
+                    "chat",
+                    "stream",
+                ],
+                "metadata": {
+                    "thread_id": conv_id,
+                    "conversation_id": conv_id,
+                    "endpoint": "chat_stream",
+                },
+                "configurable": {
+                    "thread_id": conv_id,
+                },
+            }
             from generation.state import create_initial_state
 
             initial_state = create_initial_state(

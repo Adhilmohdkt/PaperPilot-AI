@@ -1,13 +1,21 @@
 """Chunk LangChain Documents while preserving their citation metadata."""
-from typing import List
 
+from __future__ import annotations
+
+from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
-def chunk_documents(documents: List) -> List:
-    """Create deterministic chunks without making extra embedding API calls."""
-    return RecursiveCharacterTextSplitter(
-        chunk_size=1200,
-        chunk_overlap=150,
+CHUNK_SIZE = 1200
+CHUNK_OVERLAP = 150
+
+
+def chunk_documents(documents: list[Document]) -> list[Document]:
+    """Create deterministic chunks without making embedding API calls."""
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
         add_start_index=True,
-    ).split_documents(documents)
+    )
+
+    return splitter.split_documents(documents)

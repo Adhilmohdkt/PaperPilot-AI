@@ -14,13 +14,14 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
+
 from .state import AgentState
-from .routing import route_after_relevance, route_after_academic_search, route_after_ranking, route_after_paper_content
+from .routing import route_after_relevance
 
 # Groq LLM configuration - read API key from environment
 # Uses the GROQ_API_KEY already configured in .env
 _llm = ChatGroq(
-    model_name="openai/gpt-oss-20b",
+    model_name="openai/gpt-oss-120b",
     temperature=0.2,
 )
 class QueryUnderstanding(BaseModel):
@@ -30,39 +31,32 @@ class QueryUnderstanding(BaseModel):
         "general_answer",
         "local_rag",
         "academic_research",
-    ] = Field(
-        description=(
-            "The route PaperPilot should use. "
-            "'academic_research' means the user wants external academic papers, "
-            "research discovery, literature search, or paper recommendations. "
-            "'local_rag' means the user explicitly wants information from their "
-            "uploaded/local document library. "
-            "'general_answer' means the user is asking a normal explanatory or "
-            "conversational question."
-        )
-    )
+    ]
 
     topic: Optional[str] = Field(
         default=None,
-        description="The main research topic or subject in the user's query.",
+        description=(
+            "The specific research topic being investigated. "
+            "Use a precise technical description rather than generic keywords."
+        ),
     )
 
     search_query: str = Field(
         description=(
-            "A concise search query for academic retrieval. "
-            "Extract only the core research topic or keywords. "
-            "Remove conversational phrases such as 'find papers', "
-            "'can you retrieve', 'show me', or 'I am looking for'. "
-            "Correct obvious spelling mistakes while preserving the user's meaning. "
-            "For example, 'can you retrive most relevant pappers about agntic ai' "
-            "should produce 'agentic AI'."
+            "A detailed but concise academic search query. "
+            "Preserve the user's research intent and include important "
+            "technical concepts, synonyms, methods, architectures, or "
+            "research terminology when they are clearly implied by the query. "
+            "Do not merely copy the user's wording or reduce the query to "
+            "a few generic keywords. Do not invent a narrower research topic."
         ),
     )
 
     recency_requested: bool = Field(
         default=False,
         description=(
-            "Whether the user asks for recent, latest, new, or current research."
+            "Whether the user explicitly requests recent, latest, new, "
+            "or current research."
         ),
     )
 
@@ -87,65 +81,396 @@ async def query_understanding_node(state: AgentState) -> Dict[str, Any]:
     classifier = _llm.with_structured_output(QueryUnderstanding)
 
     prompt = f"""
-You are the query-understanding component of PaperPilot, an academic
+You are the Query Understanding component of PaperPilot, an academic
 research assistant.
 
-Classify the user's intent into exactly one of these routes:
+Your task is to analyze the user's request and produce a structured
+interpretation that will be used by the downstream LangGraph workflow.
 
-1. academic_research
-Use this when the user wants to:
-- find, retrieve, search for, discover, or recommend academic papers
-- find research, studies, surveys, benchmarks, or literature
-- get recent/latest/new papers on a topic
-- compare or discover external academic research
+You must distinguish between:
+1. General questions
+2. Questions about the user's local/uploaded documents
+3. Requests for external academic research
 
-Minor spelling mistakes must NOT prevent academic routing.
-For example, "retrive pappers about agntic ai" still means
+Do not answer the user's question. Only classify and transform the request
+for the downstream system.
+
+==================================================
+1. INTENT CLASSIFICATION
+==================================================
+
+Classify the user's intent into EXACTLY ONE of:
+
+A. academic_research
+
+Use academic_research when the user wants to:
+- find academic papers
+- search for research
+- discover literature
+- find studies
+- find surveys
+- find benchmarks
+- find research papers
+- retrieve papers
+- recommend papers
+- compare external academic papers
+- investigate a research topic through academic literature
+- find recent/latest/new research
+
+Explicit research-discovery language such as:
+"find papers", "show me papers", "give me papers", "find research",
+"find studies", "search the literature", etc. MUST result in
 academic_research.
 
-2. local_rag
-Use this ONLY when the user explicitly refers to their uploaded/local
-documents, PDFs, papers, or library.
+Minor spelling mistakes must not affect this classification.
 
-3. general_answer
-Use this for explanations, definitions, conversation, or questions that
-do not request paper discovery and do not explicitly request the local
-library.
+B. local_rag
 
-For academic_research, also create a concise search_query for academic
-databases.
+Use local_rag ONLY when the user explicitly asks about information
+contained in their uploaded/local documents, PDFs, papers, or library.
 
-search_query rules:
-- Keep only the core research topic or keywords.
-- Remove conversational phrases such as "find papers", "can you retrieve",
-  "show me", or "I am looking for".
-- Correct obvious spelling mistakes.
-- Preserve the intended meaning.
-- Do not include instructions or conversational wording.
+Examples of explicit local references:
+- my uploaded paper
+- my PDF
+- my documents
+- my library
+- the paper I uploaded
+- documents in my library
+
+C. general_answer
+
+Use general_answer for:
+- explanations
+- definitions
+- conceptual questions
+- how/why questions
+- general technical questions
+- casual conversation
+- questions that do not request external academic research
+- questions that do not explicitly refer to the user's local documents
+
+IMPORTANT:
+Do not classify a question as academic_research merely because it
+contains a technical or scientific topic.
+
+For example:
+"What is BM25?" → general_answer
+
+But:
+"Find papers about BM25." → academic_research
+
+
+==================================================
+2. TOPIC EXTRACTION
+==================================================
+
+For academic_research, identify the main research topic.
+
+The topic should be a concise semantic description of what the user
+is researching.
+
+It should capture the subject rather than merely copying keywords.
+
+Examples of the type of interpretation expected:
+
+"papers about memory in LLMs"
+→ topic: "LLM memory"
+
+"papers comparing sparse and dense retrieval"
+→ topic: "sparse and dense retrieval comparison"
+
+"research on hallucination detection in LLMs"
+→ topic: "LLM hallucination detection"
+
+Do not invent a narrower topic than the user requested.
+
+For general_answer and local_rag, topic may be null when a research
+topic is not needed.
+
+
+==================================================
+3. ACADEMIC SEARCH QUERY
+==================================================
+
+Only create a search_query when intent is academic_research.
+
+For general_answer:
+- search_query MUST be null.
+
+For local_rag:
+- search_query MUST be null unless an external academic search is
+  explicitly requested.
+
+    For academic_research:
+
+    Construct a dedicated academic retrieval query.
+
+    SPECIAL CASE — SPECIFIC PAPER REQUESTS
+
+    If the user explicitly names or clearly identifies a specific academic
+    paper, treat the request as a specific-paper lookup rather than a broad
+    topic search.
+
+    Examples:
+    - "Find the paper Attention Is All You Need"
+    - "Find Attention Is All You Need and explain the architecture"
+    - "Find the paper BERT and explain its pre-training method"
+
+    When a specific paper is identified:
+
+    1. Preserve the paper title or identifying phrase in search_query.
+    2. Do NOT append technical concepts from the user's explanation request.
+    3. Do NOT transform the specific paper lookup into a broad topic query.
+    4. The search_query should primarily identify the requested paper.
+    5. The original user query will be used separately for PDF/content retrieval.
+
+    Example:
+
+    User:
+    "Find the paper Attention Is All You Need and explain its Transformer
+    encoder and decoder architecture and how multi-head attention is used."
+
+    Good search_query:
+    "Attention Is All You Need"
+
+    Bad search_query:
+    "Attention Is All You Need Transformer encoder decoder multi-head attention architecture"
+
+    The paper-identification query and the content question are separate concerns.
+
+    The search_query will be sent to academic search providers such as
+    ArXiv and OpenAlex.
+
+
+The search_query is NOT the user's original question.
+
+The search_query is NOT the final answer.
+
+The search_query is NOT simply a short list of generic keywords.
+
+Construct it using the following reasoning process:
+
+STEP 1 — Identify the central research subject.
+
+Determine exactly what scientific, technical, or research topic the
+user wants papers about.
+
+STEP 2 — Identify the user's research objective.
+
+Determine what the user wants to learn or investigate about that subject.
+
+Possible objectives include:
+- methods
+- techniques
+- architectures
+- mechanisms
+- evaluation
+- benchmarking
+- comparison
+- detection
+- mitigation
+- implementation
+- optimization
+- efficiency
+- performance
+- reliability
+- applications
+- limitations
+- surveys
+
+Only include an objective when it is supported by the user's request.
+
+STEP 3 — Extract important technical concepts.
+
+Identify the technical concepts necessary to retrieve papers relevant
+to the user's actual request.
+
+STEP 4 — Add useful academic terminology.
+
+Add closely related technical terminology or established synonyms when
+they improve the probability of retrieving relevant academic literature.
+
+Do not add concepts merely because they are common in the field.
+
+Every important concept added should be directly stated or reasonably
+implied by the user's request.
+
+STEP 5 — Preserve important constraints.
+
+Preserve constraints such as:
+- comparison targets
+- application domains
+- specific methods
+- architectures
+- evaluation goals
+- benchmarks
+- mechanisms
+- requested tasks
+- explicit time requirements
+
+Do not invent constraints.
+
+STEP 6 — Correct obvious spelling mistakes.
+
+Interpret obvious misspellings according to the surrounding context.
+
+For example:
+"retrival" → "retrieval"
+"pappers" → "papers"
+"persistance" → "persistence"
+
+STEP 7 — Remove conversational wording.
+
+Remove phrases such as:
+- can you
+- could you
+- please
+- show me
+- find me
+- give me
+- I want
+- I am looking for
+- tell me
+- can you find
+
+STEP 8 — Produce the final retrieval query.
+
+The resulting query should be:
+
+- semantically precise
+- technically meaningful
+- focused on the user's research intent
+- suitable for academic search engines
+- concise enough to avoid unrelated results
+
+Do NOT optimize for query length.
+
+Use as many meaningful concepts as necessary to represent the user's
+research intent accurately, but do not create a keyword dump.
+
+Do NOT copy the original user sentence verbatim.
+
+Do NOT add unrelated concepts.
+
+Do NOT silently change the user's research question.
+
+
+==================================================
+4. ACRONYMS AND AMBIGUOUS TERMS
+==================================================
+
+Handle acronyms according to their context.
+
+If the context clearly determines the meaning, use the appropriate
+expanded terminology.
+
+Example:
+
+"papers about ANN retrieval"
+→ interpret ANN as Approximate Nearest Neighbor.
+
+A suitable search query could contain:
+"approximate nearest neighbor retrieval vector search similarity search"
+
+However, if an acronym has multiple plausible meanings and the user
+provides insufficient context, DO NOT combine unrelated meanings into
+one search query.
+
+For example:
+
+User:
+"Find papers about ANN."
+
+Do NOT produce a query containing both:
+- artificial neural networks
+- approximate nearest neighbors
+
+because this can retrieve unrelated literature.
+
+Instead, preserve the ambiguity:
+
+topic:
+"ANN"
+
+search_query:
+"ANN"
+
+If the user's later context clarifies the meaning, use that context.
+
+
+==================================================
+5. RECENCY
+==================================================
+
+Set recency_requested to TRUE only when the user explicitly requests
+recent, latest, newest, current, or otherwise time-constrained research.
 
 Examples:
 
-"can you retrive most relevant pappers about agntic ai"
--> search_query: "agentic AI"
+"Find recent papers about RAG."
+→ recency_requested: true
 
-"find recent papers about retrieval augmented generation"
--> search_query: "retrieval augmented generation"
+"Find the latest research on LLM agents."
+→ recency_requested: true
 
-"show me papers on hallucination detection in LLMs"
--> search_query: "hallucination detection LLMs"
+"Find papers about RAG."
+→ recency_requested: false
 
-Important distinction:
+Do not invent a year or date range.
 
-"What is RAG?"
--> general_answer
+Do not add a date to search_query unless the user explicitly provides
+a time requirement.
 
-"Find papers about RAG"
--> academic_research
 
-"What does my uploaded paper say about RAG?"
--> local_rag
+==================================================
+6. CONVERSATIONAL CONTEXT
+==================================================
 
-User query:
+Use available conversation history when the current query is a
+follow-up to an earlier research discussion.
+
+Examples:
+- "find more papers about this"
+- "show me newer ones"
+- "compare these papers"
+- "find papers similar to them"
+
+Use the previous context to resolve references when possible.
+
+Do not invent missing context.
+
+The current user query remains the primary source of intent.
+
+
+==================================================
+7. QUALITY REQUIREMENTS
+==================================================
+
+Before producing the structured output, internally verify:
+
+1. Is the intent correct?
+2. If academic_research, does the topic accurately represent the
+   research subject?
+3. Does the search_query represent the user's actual research intent?
+4. Did the search_query preserve important technical concepts?
+5. Did it preserve comparison/evaluation/methodology/application
+   requirements when present?
+6. Did it remove conversational wording?
+7. Did it avoid unrelated concepts?
+8. Did it avoid inventing information?
+9. Did it handle ambiguous acronyms appropriately?
+10. Is search_query null when academic retrieval is not required?
+
+IMPORTANT:
+Do not expose this reasoning or checklist in the response.
+
+Return ONLY the structured QueryUnderstanding object.
+
+==================================================
+
+USER QUERY
+==================================================
+
 {query}
 """
 
@@ -337,68 +662,51 @@ async def academic_search_node(state: AgentState) -> Dict[str, Any]:
 
 
 async def normalize_papers_node(state: AgentState) -> Dict[str, Any]:
-    """Normalize and deduplicate the ranked academic papers.
+    """Normalize, deduplicate, rank, and expose academic papers to generation."""
 
-    Ensures papers have consistent metadata format and removes duplicates
-    based on arXiv ID or OpenAlex DOI.
-
-    Sets:
-        normalized_papers: list of normalized AcademicPaper objects
-    """
     from config import settings
     from retrieval.academic.ranker import normalize_and_rank
 
-    query = state.get("user_query") or state.get("query", "")
+    query = (
+        state.get("search_query")
+        or state.get("query_topic")
+        or state.get("user_query")
+        or state.get("query", "")
+    )
+
     ranked_papers = normalize_and_rank(
         query,
         state.get("academic_papers", []),
         top_k=settings.academic_top_k,
     )
-    # Generation and SSE only consume plain dictionaries. Preserve all useful
-    # provider metadata rather than passing dataclass objects through state.
-    normalized = [
-        {
-            "kind": "academic",
-            "title": paper.title,
-            "authors": paper.authors,
-            "abstract": paper.abstract,
-            "text": paper.abstract or "",
-            "publication_date": paper.publication_date,
-            "year": paper.year,
-            "provider": paper.provider,
-            "source": paper.paper_url,
-            "paper_url": paper.paper_url,
-            "pdf_url": paper.pdf_url,
-            "doi": paper.doi,
-            "arxiv_id": paper.arxiv_id,
-            "openalex_id": paper.openalex_id,
-            "citation_count": paper.citation_count,
-            "relevance_score": paper.relevance_score,
-        }
-        for paper in ranked_papers
-    ]
+
+    final_docs = []
+
+    for paper in ranked_papers:
+        final_docs.append(
+            {
+                "kind": "academic",
+                "title": paper.title,
+                "authors": paper.authors,
+                "abstract": paper.abstract,
+                "publication_date": paper.publication_date,
+                "year": paper.year,
+                "provider": paper.provider,
+                "paper_url": paper.paper_url,
+                "pdf_url": paper.pdf_url,
+                "doi": paper.doi,
+                "arxiv_id": paper.arxiv_id,
+                "openalex_id": paper.openalex_id,
+                "citation_count": paper.citation_count,
+                "relevance_score": paper.relevance_score,
+            }
+        )
 
     return {
         "ranked_papers": ranked_papers,
-        "normalized_papers": normalized,
-        "final_docs": normalized,
+        "normalized_papers": ranked_papers,
+        "final_docs": final_docs,
     }
-
-
-async def paper_content_node(state: AgentState) -> Dict[str, Any]:
-    """Optional PDF content retrieval for top-ranked academic papers.
-
-    Fetches and processes PDF content for the top 1-2 ranked papers
-    to provide additional context for generation. PDF content is temporary
-    research context and is NOT permanently indexed into Weaviate.
-
-    Sets:
-        paper_content_texts: extracted text from top papers' PDFs
-    """
-    # Search-result metadata is sufficient for recommendations. PDF downloads
-    # remain opt-in so a normal discovery query never downloads papers.
-    return {"paper_content_texts": []}
-
 
 async def generate_node(state: AgentState) -> Dict[str, Any]:
     """Generate the final answer using the Groq LLM, grounded in retrieved context.
@@ -417,8 +725,7 @@ async def generate_node(state: AgentState) -> Dict[str, Any]:
     final_docs = state.get("final_docs", [])
     citations = state.get("citations", [])
     intent = state.get("intent") or state.get("route", "general_answer")
-    history = state.get("messages", [])
-
+    history = state.get("conversation_history", [])
     # Generate answer using the existing generator pipeline
     try:
         result = await generate_answer(
@@ -427,6 +734,7 @@ async def generate_node(state: AgentState) -> Dict[str, Any]:
             citations=citations,
             intent=intent,
             history=history,
+            paper_content_texts=state.get("paper_content_texts", []),
         )
     except Exception as e:
         # Fallback error handling
@@ -543,4 +851,76 @@ async def error_handler_node(state: AgentState) -> Dict[str, Any]:
     return {
         "error": error,
         "error_occurred": error is not None,
+    }
+async def paper_content_node(state: AgentState) -> Dict[str, Any]:
+    """Retrieve temporary, question-relevant PDF content for academic papers.
+
+    Public academic PDFs are downloaded only for the current research
+    request. Their contents are processed through the temporary PDF
+    retrieval pipeline and are never added to the permanent Weaviate
+    library.
+
+    The node uses the already normalized/ranked academic papers and
+    retrieves content from up to the top two papers that expose a
+    public PDF URL.
+    """
+
+    from retrieval.academic.pdf_fetch import fetch_paper_context
+
+    query = (
+        state.get("user_query")
+        or state.get("query")
+        or ""
+    ).strip()
+
+    ranked_papers = state.get("ranked_papers", [])
+
+    if not ranked_papers:
+        return {
+            "paper_content_texts": []
+        }
+
+    paper_content_texts: List[Dict[str, Any]] = []
+
+    # Only inspect the top two ranked papers.
+    # This keeps PDF retrieval bounded and avoids unnecessary downloads.
+    papers_with_pdf = [
+        paper
+        for paper in ranked_papers
+        if getattr(paper, "pdf_url", None)
+    ][:2]
+
+    for paper in papers_with_pdf:
+        try:
+            context = await fetch_paper_context(
+                paper=paper,
+                query=query,
+                max_chunks=8,
+            )
+
+            if not context:
+                continue
+
+            paper_content_texts.append(
+                {
+                    "title": paper.title,
+                    "authors": paper.authors,
+                    "year": paper.year,
+                    "publication_date": paper.publication_date,
+                    "paper_url": paper.paper_url,
+                    "pdf_url": paper.pdf_url,
+                    "doi": paper.doi,
+                    "arxiv_id": paper.arxiv_id,
+                    "openalex_id": paper.openalex_id,
+                    "content": context,
+                }
+            )
+
+        except Exception as exc:
+            # A failure for one paper must not stop the entire
+            # academic research workflow.
+            continue
+
+    return {
+        "paper_content_texts": paper_content_texts
     }

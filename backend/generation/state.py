@@ -13,7 +13,7 @@ class AgentState(TypedDict, total=False):
     query: str
     user_query: str
     source_filter: Optional[str]
-    messages: List[Dict[str, str]]
+    conversation_history: List[Dict[str, str]]
     intent: Literal["general_answer", "local_rag", "academic_research"]
     route: str
     final_docs: List[Dict[str, Any]]
@@ -42,7 +42,7 @@ def create_initial_state(
     "user_query": query,
     "search_query": "",
     "source_filter": source_filter,
-    "messages": history or [],
+    "conversation_history": history or [],
     "intent": "general_answer",
     "route": "general_answer",
     "final_docs": [],

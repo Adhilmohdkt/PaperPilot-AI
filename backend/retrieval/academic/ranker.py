@@ -1,120 +1,426 @@
-"""Paper normalization, deduplication, and deterministic ranking for Phase 2."""
+"""Academic paper normalization, deduplication, and deterministic ranking."""
+
 from __future__ import annotations
 
 import math
+import re
+from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional
+from typing import List
 
-from .base import AcademicPaper, AcademicSearchProvider
-
-
-# ── Configuration ──────────────────────────────────────────────────────────
-
-# Weight for lexical-relevance score (0.0–1.0)
-LEXICAL_WEIGHT: float = 0.55
-
-# Weight for recency score (newer papers get a small boost)
-RECENCY_WEIGHT: float = 0.25
-
-# Weight for citation-count score (more cited → slightly higher)
-CITATION_WEIGHT: float = 0.20
-
-# How many years back a paper is "recent" for the recency boost
-RECENCY_WINDOW_YEARS: int = 5
-
-# Minimum citation count to contribute to the citation score
-MIN_CITATIONS_FOR_SCORE: int = 1
-
-# Threshold for considering two papers "duplicates" (title similarity)
-TITLE_DUPLICATE_THRESHOLD: float = 0.85
+from .base import AcademicPaper
 
 
-# ── Shared helpers ────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Ranking configuration
+# ---------------------------------------------------------------------------
 
-def _normalize_text(txt: str | None) -> str:
-    """Lowercase, strip, collapse whitespace."""
-    if not txt:
+LEXICAL_WEIGHT = 0.60
+RECENCY_WEIGHT = 0.25
+CITATION_WEIGHT = 0.15
+
+RECENCY_WINDOW_YEARS = 5
+
+MIN_CITATIONS_FOR_SCORE = 1
+
+TITLE_DUPLICATE_THRESHOLD = 0.90
+
+
+# ---------------------------------------------------------------------------
+# Text normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_text(text: str | None) -> str:
+    """Normalize text for comparison."""
+
+    if not text:
         return ""
-    return " ".join(txt.lower().split())
+
+    text = text.lower()
+
+    # Normalize punctuation to spaces.
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+
+    # Collapse whitespace.
+    return " ".join(text.split())
 
 
 def _token_set(text: str) -> set[str]:
-    """Return a set of significant tokens from text."""
-    return {t for t in _normalize_text(text).split() if len(t) > 2}
+    """Return meaningful tokens from text."""
+
+    normalized = _normalize_text(text)
+
+    return {
+        token
+        for token in normalized.split()
+        if len(token) > 2
+    }
 
 
-def _lexical_score(query_tokens: set[str], paper_tokens: set[str]) -> float:
-    """Jaccard-like overlap between query tokens and paper tokens (title+abstract)."""
-    if not query_tokens or not paper_tokens:
+# ---------------------------------------------------------------------------
+# Query relevance
+# ---------------------------------------------------------------------------
+
+_ACADEMIC_STOPWORDS = {
+    "about",
+    "and",
+    "are",
+    "based",
+    "for",
+    "from",
+    "into",
+    "methods",
+    "model",
+    "models",
+    "of",
+    "on",
+    "paper",
+    "papers",
+    "research",
+    "the",
+    "this",
+    "using",
+    "with",
+}
+
+
+def _query_phrases(query: str) -> list[str]:
+    """Extract meaningful multi-word phrases from an academic query."""
+
+    normalized = _normalize_text(query)
+    tokens = normalized.split()
+
+    phrases: list[str] = []
+
+    # Preserve common technical multi-word concepts when they occur
+    # consecutively in the query.
+    for size in (4, 3, 2):
+        for index in range(len(tokens) - size + 1):
+            phrase_tokens = tokens[index:index + size]
+
+            if all(
+                token not in _ACADEMIC_STOPWORDS
+                for token in phrase_tokens
+            ):
+                phrases.append(" ".join(phrase_tokens))
+
+    # Remove phrases contained inside longer phrases.
+    unique_phrases: list[str] = []
+
+    for phrase in phrases:
+        if not any(
+            phrase != other and phrase in other
+            for other in phrases
+        ):
+            unique_phrases.append(phrase)
+
+    return unique_phrases
+
+
+def _lexical_score(
+    query: str,
+    paper: AcademicPaper,
+) -> float:
+    """Calculate phrase-aware lexical relevance."""
+
+    normalized_query = _normalize_text(query)
+
+    if not normalized_query:
         return 0.0
-    intersection = len(query_tokens & paper_tokens)
-    union = len(query_tokens | paper_tokens)
-    return intersection / union if union else 0.0
+
+    normalized_title = _normalize_text(paper.title)
+    normalized_abstract = _normalize_text(paper.abstract)
+
+    if not normalized_title and not normalized_abstract:
+        return 0.0
+
+    query_tokens = _token_set(query)
+    title_tokens = _token_set(paper.title or "")
+    abstract_tokens = _token_set(paper.abstract or "")
+
+    if not query_tokens:
+        return 0.0
+
+    # Query coverage.
+    title_coverage = (
+        len(query_tokens & title_tokens) / len(query_tokens)
+    )
+
+    abstract_coverage = (
+        len(query_tokens & abstract_tokens) / len(query_tokens)
+    )
+
+    # Title is more informative than abstract for academic search.
+    token_score = (
+        0.70 * title_coverage
+        + 0.30 * abstract_coverage
+    )
+
+    # Exact phrase matches provide stronger semantic evidence.
+    phrase_score = 0.0
+
+    for phrase in _query_phrases(query):
+        if phrase in normalized_title:
+            phrase_score = max(phrase_score, 1.0)
+        elif phrase in normalized_abstract:
+            phrase_score = max(phrase_score, 0.6)
+
+    # Exact full-query match is a very strong signal.
+    exact_query_bonus = 0.0
+
+    if normalized_query in normalized_title:
+        exact_query_bonus = 1.0
+    elif normalized_query in normalized_abstract:
+        exact_query_bonus = 0.5
+
+    score = (
+        0.70 * token_score
+        + 0.25 * phrase_score
+        + 0.05 * exact_query_bonus
+    )
+
+    return min(score, 1.0)
 
 
-def _year_score(year: int | None, current_year: int = 2025) -> float:
-    """Recency score: newer papers score higher.
+def _paper_text_tokens(
+    paper: AcademicPaper,
+) -> set[str]:
+    """Return tokens from title and abstract."""
 
-    Linear decay: a paper from (current_year - RECENCY_WINDOW_YEARS) gets 0.5,
-    older papers get proportionally less.
-    """
+    title_tokens = _token_set(
+        paper.title or ""
+    )
+
+    abstract_tokens = _token_set(
+        paper.abstract or ""
+    )
+
+    return title_tokens | abstract_tokens
+
+
+# ---------------------------------------------------------------------------
+# Recency scoring
+# ---------------------------------------------------------------------------
+
+
+def _year_score(
+    year: int | None,
+    current_year: int | None = None,
+) -> float:
+    """Return a deterministic recency score between 0.5 and 1.0."""
+
+    if current_year is None:
+        current_year = datetime.now().year
+
     if year is None:
-        return 0.5  # neutral — no penalty, no boost
-    age = current_year - year
-    if age <= 0:
-        return 1.0
+        return 0.5
+
+    age = max(0, current_year - year)
+
     if age >= RECENCY_WINDOW_YEARS:
         return 0.5
-    # Linear interpolation: age 0→1.0, age N→0.5
-    return 1.0 - (age / RECENCY_WINDOW_YEARS) * 0.5
+
+    return 1.0 - (
+        age / RECENCY_WINDOW_YEARS
+    ) * 0.5
 
 
-def _citation_score(citations: int | None) -> float:
-    """Citation-count score: logarithmic scaling so very-high doesn't dominate."""
+# ---------------------------------------------------------------------------
+# Citation scoring
+# ---------------------------------------------------------------------------
+
+
+def _citation_score(
+    citations: int | None,
+) -> float:
+    """Return a logarithmically scaled citation score."""
+
     if citations is None or citations < MIN_CITATIONS_FOR_SCORE:
-        return 0.5  # neutral
-    # log10 scale, capped: 1 citation ≈ 0.8, 100 ≈ 1.0
-    raw = min(math.log10(max(citations, 1)), 1.0)
-    return 0.5 + raw * 0.5
+        return 0.5
+
+    # Prevent extremely highly cited papers from dominating relevance.
+    log_score = min(
+        math.log10(max(citations, 1)),
+        2.0,
+    )
+
+    # Map approximately:
+    # 1 citation   -> 0.50
+    # 10 citations -> 0.75
+    # 100 citations -> 1.00
+    return min(
+        1.0,
+        0.5 + (log_score / 4.0),
+    )
 
 
-def _paper_text_tokens(paper: AcademicPaper) -> set[str]:
-    """Token set from a paper's title and abstract."""
-    tokens: set[str] = _token_set(paper.title or "")
-    tokens.update(_token_set(paper.abstract or ""))
-    return tokens
+# ---------------------------------------------------------------------------
+# Duplicate detection
+# ---------------------------------------------------------------------------
 
 
-def _is_duplicate(paper_a: AcademicPaper, paper_b: AcademicPaper) -> bool:
-    """Heuristic: two papers are likely duplicates if their title tokens overlap heavily."""
-    tokens_a = _paper_text_tokens(paper_a)
-    tokens_b = _paper_text_tokens(paper_b)
-    if not tokens_a or not tokens_b:
-        return False
-    return _lexical_score(tokens_a, tokens_b) >= TITLE_DUPLICATE_THRESHOLD
+def _normalize_title(
+    title: str | None,
+) -> str:
+    """Normalize a title specifically for duplicate detection."""
+
+    return _normalize_text(title)
 
 
-def _dedupe_papers(papers: List[AcademicPaper]) -> List[AcademicPaper]:
-    """Remove near-duplicate papers based on title similarity.
+def _same_identifier(
+    paper_a: AcademicPaper,
+    paper_b: AcademicPaper,
+) -> bool:
+    """Check whether two papers share a reliable identifier."""
 
-    Keeps the paper with the higher citation count (or earlier year as tiebreaker).
-    """
+    # arXiv identifier.
+    if (
+        paper_a.arxiv_id
+        and paper_b.arxiv_id
+        and paper_a.arxiv_id.lower()
+        == paper_b.arxiv_id.lower()
+    ):
+        return True
+
+    # DOI.
+    if (
+        paper_a.doi
+        and paper_b.doi
+        and paper_a.doi.lower().strip()
+        == paper_b.doi.lower().strip()
+    ):
+        return True
+
+    # OpenAlex ID.
+    if (
+        paper_a.openalex_id
+        and paper_b.openalex_id
+        and paper_a.openalex_id.lower()
+        == paper_b.openalex_id.lower()
+    ):
+        return True
+
+    return False
+
+
+def _title_similarity(
+    title_a: str,
+    title_b: str,
+) -> float:
+    """Calculate normalized title similarity."""
+
+    normalized_a = _normalize_title(title_a)
+    normalized_b = _normalize_title(title_b)
+
+    if not normalized_a or not normalized_b:
+        return 0.0
+
+    return SequenceMatcher(
+        None,
+        normalized_a,
+        normalized_b,
+    ).ratio()
+
+
+def _is_duplicate(
+    paper_a: AcademicPaper,
+    paper_b: AcademicPaper,
+) -> bool:
+    """Determine whether two academic records represent the same paper."""
+
+    # Reliable identifiers are the strongest signal.
+    if _same_identifier(paper_a, paper_b):
+        return True
+
+    # Fall back to title similarity.
+    similarity = _title_similarity(
+        paper_a.title or "",
+        paper_b.title or "",
+    )
+
+    return similarity >= TITLE_DUPLICATE_THRESHOLD
+
+
+def _dedupe_papers(
+    papers: List[AcademicPaper],
+) -> List[AcademicPaper]:
+    """Remove duplicate papers while preferring richer records."""
+
     if not papers:
         return []
-    deduped: List[AcademicPaper] = [papers[0]]
-    for candidate in papers[1:]:
-        is_dup = False
-        for existing in deduped:
-            if _is_duplicate(existing, candidate):
-                # Keep the one with more citations; if tied, earlier year
-                if (candidate.citation_count or 0) > (existing.citation_count or 0):
-                    # Replace existing with candidate
-                    deduped[deduped.index(existing)] = candidate
-                is_dup = True
+
+    deduped: List[AcademicPaper] = []
+
+    for candidate in papers:
+
+        duplicate_index = None
+
+        for index, existing in enumerate(deduped):
+
+            if _is_duplicate(
+                existing,
+                candidate,
+            ):
+                duplicate_index = index
                 break
-        if not is_dup:
+
+        if duplicate_index is None:
             deduped.append(candidate)
+            continue
+
+        existing = deduped[duplicate_index]
+
+        # Prefer the record with more complete metadata.
+        existing_completeness = _metadata_completeness(
+            existing
+        )
+
+        candidate_completeness = _metadata_completeness(
+            candidate
+        )
+
+        if candidate_completeness > existing_completeness:
+            deduped[duplicate_index] = candidate
+
+        elif (
+            candidate_completeness
+            == existing_completeness
+            and (candidate.citation_count or 0)
+            > (existing.citation_count or 0)
+        ):
+            deduped[duplicate_index] = candidate
+
     return deduped
+
+
+def _metadata_completeness(
+    paper: AcademicPaper,
+) -> int:
+    """Score how complete a paper record is."""
+
+    fields = [
+        paper.title,
+        paper.abstract,
+        paper.authors,
+        paper.publication_date,
+        paper.paper_url,
+        paper.pdf_url,
+        paper.doi,
+        paper.arxiv_id,
+        paper.openalex_id,
+    ]
+
+    return sum(
+        1
+        for field in fields
+        if field
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ranking
+# ---------------------------------------------------------------------------
 
 
 def _rank_papers(
@@ -122,73 +428,112 @@ def _rank_papers(
     papers: List[AcademicPaper],
     top_k: int = 10,
 ) -> List[AcademicPaper]:
-    """Rank papers by a deterministic composite score and return top_k.
+    """Rank papers using deterministic relevance signals."""
 
-    The composite score combines:
-      - Lexical query relevance (Jaccard overlap of query vs. title+abstract)
-      - Recency (newer = better)
-      - Citation count (more cited = slightly better)
-    """
     if not papers:
         return []
 
-    query_tokens = _token_set(query)
+    scored: List[
+        tuple[AcademicPaper, float, float]
+    ] = []
 
-    # Compute a composite score for each paper
-    scored: List[tuple[AcademicPaper, float]] = []
     for paper in papers:
-        lexical = _lexical_score(query_tokens, _paper_text_tokens(paper))
-        recency = _year_score(paper.year)
-        citation = _citation_score(paper.citation_count)
+
+        lexical = _lexical_score(
+            query,
+            paper,
+        )
+
+        recency = _year_score(
+            paper.year
+        )
+
+        citation = _citation_score(
+            paper.citation_count
+        )
 
         composite = (
             LEXICAL_WEIGHT * lexical
             + RECENCY_WEIGHT * recency
             + CITATION_WEIGHT * citation
         )
-        scored.append((paper, composite))
 
-    # Sort descending by composite score
-    scored.sort(key=lambda x: x[1], reverse=True)
+        scored.append(
+            (
+                paper,
+                composite,
+                lexical,
+            )
+        )
 
-    # Return top_k
-    top_n = min(top_k, len(scored))
-    return [paper for paper, _ in scored[:top_n]]
+    # Primary:
+    #   composite relevance
+    #
+    # Secondary:
+    #   lexical relevance
+    #
+    # Tertiary:
+    #   citation count
+    #
+    # This keeps ranking deterministic.
+
+    scored.sort(
+        key=lambda item: (
+            item[1],
+            item[2],
+            item[0].citation_count or 0,
+        ),
+        reverse=True,
+    )
+
+    ranked = [
+        item[0]
+        for item in scored[:top_k]
+    ]
+
+    # Store the actual composite relevance score.
+    for paper, composite, _ in scored[:top_k]:
+        paper.relevance_score = round(
+            composite,
+            3,
+        )
+
+    return ranked
 
 
-# ── Public API ────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 
 def normalize_and_rank(
     query: str,
     papers: List[AcademicPaper],
     top_k: int = 5,
 ) -> List[AcademicPaper]:
-    """Full pipeline: dedupe → rank → return top_k.
+    """Deduplicate, rank, and return the top academic papers."""
 
-    Args:
-        query: The original user query.
-        papers: Raw papers from one or more providers (may contain duplicates).
-        top_k: Number of final papers to return.
+    if not papers:
+        return []
 
-    Returns:
-        A deduplicated, reranked list of AcademicPaper objects, sorted by
-        relevance to the query.
-    """
-    # Step 1: deduplicate
-    deduped = _dedupe_papers(papers)
+    # 1. Remove duplicate records.
+    deduped = _dedupe_papers(
+        papers
+    )
 
-    # Step 2: rank
-    ranked = _rank_papers(query, deduped, top_k=top_k)
-
-    # Step 3: assign final relevance scores (for downstream use)
-    query_tokens = _token_set(query)
-    for i, paper in enumerate(ranked, start=1):
-        paper.relevance_score = round(
-            _lexical_score(query_tokens, _paper_text_tokens(paper)), 3
-        )
+    # 2. Deterministically rank remaining papers.
+    ranked = _rank_papers(
+        query,
+        deduped,
+        top_k=top_k,
+    )
 
     return ranked
 
-# Backwards-compatibility aliases for nodes.py import
+
+# ---------------------------------------------------------------------------
+# Backward-compatible aliases
+# ---------------------------------------------------------------------------
+
 rank_papers = normalize_and_rank
 normalize_papers = normalize_and_rank
