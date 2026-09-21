@@ -1,15 +1,44 @@
+# Environments
 venv/
-__pycache__/
+.venv/
+env/
 .env
-node_modules/
-*.pyc
-Data/
-build/
-venv/
+.env.local
+.env.*.local
+
+# Python
 __pycache__/
-.env
-node_modules/
 *.pyc
-Data/
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & scratch outputs
+*.log
+*.txt
+!requirements.txt
+!backend/requirements.txt
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+backend/conversations.db
+
+# Node / React
+node_modules/
 build/
-backend/*.db
+.npm/
+
+# Data / Uploads
+Data/
+!Data/sample.pdf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+

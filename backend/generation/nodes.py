@@ -561,18 +561,20 @@ async def local_retrieve_node(state: AgentState) -> Dict[str, Any]:
     # Use the existing retriever with hybrid BM25+vector search + Cohere reranking
     docs = retrieve(query, source_filter=source_filter)
 
-    # Normalize results to have consistent structure
+    from generation.sources import format_source_for_ui
+
+    # Normalize results so the UI can show a filename, excerpt, and page.
     final_docs = [
-        {
-            "text": doc.get("text", ""),
-            "source": doc.get("source", "Unknown"),
-            "page": doc.get("page"),
-            "kind": "library",
-            "metadata": {
+        format_source_for_ui(
+            {
+                "text": doc.get("text", ""),
+                "source": doc.get("source") or doc.get("filename") or "Unknown",
+                "filename": doc.get("filename"),
+                "page": doc.get("page") or doc.get("page_number"),
+                "kind": "library",
                 "chunk_id": doc.get("chunk_id"),
-                "content_hash": doc.get("content_hash"),
-            },
-        }
+            }
+        )
         for doc in docs
     ]
 
@@ -665,6 +667,7 @@ async def normalize_papers_node(state: AgentState) -> Dict[str, Any]:
     """Normalize, deduplicate, rank, and expose academic papers to generation."""
 
     from config import settings
+    from generation.sources import format_source_for_ui
     from retrieval.academic.ranker import normalize_and_rank
 
     query = (
@@ -678,28 +681,33 @@ async def normalize_papers_node(state: AgentState) -> Dict[str, Any]:
         query,
         state.get("academic_papers", []),
         top_k=settings.academic_top_k,
+        recency_requested=state.get("recency_requested", False),
     )
 
     final_docs = []
 
     for paper in ranked_papers:
         final_docs.append(
-            {
-                "kind": "academic",
-                "title": paper.title,
-                "authors": paper.authors,
-                "abstract": paper.abstract,
-                "publication_date": paper.publication_date,
-                "year": paper.year,
-                "provider": paper.provider,
-                "paper_url": paper.paper_url,
-                "pdf_url": paper.pdf_url,
-                "doi": paper.doi,
-                "arxiv_id": paper.arxiv_id,
-                "openalex_id": paper.openalex_id,
-                "citation_count": paper.citation_count,
-                "relevance_score": paper.relevance_score,
-            }
+            format_source_for_ui(
+                {
+                    "kind": "academic",
+                    "title": paper.title,
+                    "source": paper.title or paper.pdf_url or paper.paper_url,
+                    "text": paper.abstract,
+                    "abstract": paper.abstract,
+                    "authors": paper.authors,
+                    "publication_date": paper.publication_date,
+                    "year": paper.year,
+                    "provider": paper.provider,
+                    "paper_url": paper.paper_url,
+                    "pdf_url": paper.pdf_url,
+                    "doi": paper.doi,
+                    "arxiv_id": paper.arxiv_id,
+                    "openalex_id": paper.openalex_id,
+                    "citation_count": paper.citation_count,
+                    "relevance_score": paper.relevance_score,
+                }
+            )
         )
 
     return {
@@ -719,7 +727,11 @@ async def generate_node(state: AgentState) -> Dict[str, Any]:
         final_docs: docs used as context
         citations: validated citation references
     """
-    from generation.generator import generate_answer
+    from generation.generator import (
+        compact_paper_contents,
+        generate_answer,
+        is_payload_too_large,
+    )
 
     query = state.get("user_query") or state.get("query", "")
     final_docs = state.get("final_docs", [])
@@ -737,12 +749,33 @@ async def generate_node(state: AgentState) -> Dict[str, Any]:
             paper_content_texts=state.get("paper_content_texts", []),
         )
     except Exception as e:
-        # Fallback error handling
-        return {
-            "answer": "I encountered an error while researching. Please try again or rephrase your question.",
-            "final_docs": final_docs,
-            "citations": [],
-        }
+        if is_payload_too_large(e):
+            try:
+                result = await generate_answer(
+                    query=query,
+                    final_docs=final_docs,
+                    citations=citations,
+                    intent=intent,
+                    history=[],
+                    paper_content_texts=compact_paper_contents(
+                        state.get("paper_content_texts", [])
+                    ),
+                )
+            except Exception:
+                return {
+                    "response": (
+                        "The research context exceeded the model token limit. "
+                        "Ask a more specific follow-up or start a new chat."
+                    ),
+                    "final_docs": final_docs,
+                    "citations": [],
+                }
+        else:
+            return {
+                "response": "I encountered an error while researching. Please try again or rephrase your question.",
+                "final_docs": final_docs,
+                "citations": [],
+            }
 
     # Return response for compatibility with AgentState
     # The workflow stores the final answer in state["response"]
@@ -895,7 +928,7 @@ async def paper_content_node(state: AgentState) -> Dict[str, Any]:
             context = await fetch_paper_context(
                 paper=paper,
                 query=query,
-                max_chunks=8,
+                max_chunks=3,
             )
 
             if not context:

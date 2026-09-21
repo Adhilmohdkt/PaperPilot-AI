@@ -34,7 +34,7 @@ DEFAULT_PDF_MAX = 2
 PDF_DOWNLOAD_TIMEOUT = 30
 PDF_MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 
-MAX_CHUNKS_PER_PAPER = 8
+MAX_CHUNKS_PER_PAPER = 3
 
 
 # ---------------------------------------------------------------------------

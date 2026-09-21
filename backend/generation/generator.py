@@ -26,6 +26,69 @@ from langchain_core.messages import (
 )
 from langchain_groq import ChatGroq
 
+# Stay under Groq's 8k TPM / small-payload models on follow-up turns.
+MAX_HISTORY_MESSAGES = 4
+MAX_MESSAGE_CHARS = 1000
+MAX_LIBRARY_CHUNK_CHARS = 800
+MAX_ABSTRACT_CHARS = 400
+MAX_PDF_CONTENT_CHARS = 1600
+MAX_PROMPT_CHARS = 18000
+MAX_LIBRARY_CHUNKS = 5
+MAX_ACADEMIC_PAPERS = 5
+
+
+def truncate_text(text: Any, limit: int) -> str:
+    """Trim text to a hard character budget."""
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(limit - 3, 0)].rstrip() + "..."
+
+
+def is_payload_too_large(error: BaseException) -> bool:
+    """Detect Groq/LangChain request-size and TPM failures."""
+    text = str(error).lower()
+    return any(
+        marker in text
+        for marker in (
+            "413",
+            "request too large",
+            "payload too large",
+            "context_length",
+            "context window",
+            "tokens per minute",
+            "tpm",
+            "rate_limit_exceeded",
+        )
+    )
+
+
+def compact_paper_contents(
+    paper_content_texts: Optional[List[Dict[str, Any]]],
+    limit: int = 800,
+) -> List[Dict[str, Any]]:
+    """Keep only short PDF excerpts for a retry after a 413."""
+    compacted: List[Dict[str, Any]] = []
+    for paper in paper_content_texts or []:
+        if not isinstance(paper, dict):
+            continue
+        compacted.append(
+            {
+                **paper,
+                "content": truncate_text(paper.get("content"), limit),
+            }
+        )
+    return compacted[:2]
+
+
+def _message_text(message: BaseMessage) -> str:
+    content = getattr(message, "content", "")
+    return content if isinstance(content, str) else str(content or "")
+
+
+def _prompt_chars(messages: List[BaseMessage]) -> int:
+    return sum(len(_message_text(message)) for message in messages)
+
 
 async def generate_answer(
     query: str,
@@ -108,6 +171,7 @@ async def generate_answer(
 
         # Add the current question exactly once.
         messages.append(HumanMessage(content=query))
+        messages = _fit_messages(messages)
 
         response = await model.ainvoke(messages)
 
@@ -140,8 +204,8 @@ async def generate_answer(
 
     library_parts: List[str] = []
 
-    for index, chunk in enumerate(library_chunks, start=1):
-        text = chunk.get("text", "").strip()
+    for index, chunk in enumerate(library_chunks[:MAX_LIBRARY_CHUNKS], start=1):
+        text = truncate_text(chunk.get("text", ""), MAX_LIBRARY_CHUNK_CHARS)
 
         if not text:
             continue
@@ -158,7 +222,7 @@ async def generate_answer(
 
     academic_parts: List[str] = []
 
-    for index, paper in enumerate(academic_entries, start=1):
+    for index, paper in enumerate(academic_entries[:MAX_ACADEMIC_PAPERS], start=1):
         if not isinstance(paper, dict):
             continue
 
@@ -191,7 +255,7 @@ async def generate_answer(
         if abstract:
             # Keep academic metadata context compact.
             parts.append(
-                f"Abstract: {str(abstract)[:400]}"
+                f"Abstract: {truncate_text(abstract, MAX_ABSTRACT_CHARS)}"
             )
 
         doi = paper.get("doi")
@@ -230,7 +294,7 @@ async def generate_answer(
         if not title or not content:
             continue
 
-        for index, paper in enumerate(academic_entries):
+        for index, paper in enumerate(academic_entries[:MAX_ACADEMIC_PAPERS]):
             if not isinstance(paper, dict):
                 continue
 
@@ -239,7 +303,7 @@ async def generate_answer(
 
             academic_parts[index] += (
                 "\n\nRelevant PDF content:\n"
-                f"{content}"
+                f"{truncate_text(content, MAX_PDF_CONTENT_CHARS)}"
             )
 
             break
@@ -307,6 +371,7 @@ async def generate_answer(
     messages.append(
         HumanMessage(content=user_message)
     )
+    messages = _fit_messages(messages)
 
     # ------------------------------------------------------------------
     # Generate answer
@@ -344,32 +409,60 @@ def _convert_history_to_messages(
 
     messages: List[BaseMessage] = []
 
-    for message in history or []:
+    for message in (history or [])[-MAX_HISTORY_MESSAGES:]:
 
         if isinstance(message, BaseMessage):
-            messages.append(message)
+            clipped = message
+            text = truncate_text(_message_text(message), MAX_MESSAGE_CHARS)
+            if isinstance(message, HumanMessage):
+                clipped = HumanMessage(content=text)
+            elif isinstance(message, AIMessage):
+                clipped = AIMessage(content=text)
+            messages.append(clipped)
             continue
 
         if not isinstance(message, dict):
             continue
 
         role = message.get("role")
-        content = message.get("content", "")
+        content = truncate_text(message.get("content", ""), MAX_MESSAGE_CHARS)
 
         if not content:
             continue
 
         if role == "user":
             messages.append(
-                HumanMessage(content=str(content))
+                HumanMessage(content=content)
             )
 
         elif role == "assistant":
             messages.append(
-                AIMessage(content=str(content))
+                AIMessage(content=content)
             )
 
     return messages
+
+
+def _fit_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Drop oldest history, then shrink evidence, until the prompt fits."""
+
+    fitted = list(messages)
+    while _prompt_chars(fitted) > MAX_PROMPT_CHARS and len(fitted) > 2:
+        # Keep system prompt [0] and current user question [-1].
+        del fitted[1]
+        continue
+
+    if _prompt_chars(fitted) > MAX_PROMPT_CHARS:
+        current = fitted[-1]
+        budget = max(
+            MAX_PROMPT_CHARS - _prompt_chars(fitted[:-1]),
+            500,
+        )
+        fitted[-1] = HumanMessage(
+            content=truncate_text(_message_text(current), budget)
+        )
+
+    return fitted
 
 
 def _extract_response_text(response: Any) -> str:

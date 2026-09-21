@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from generation.sources import format_sources_for_ui
 from generation.workflow import workflow, run_workflow
 from generation.state import AgentState
 from langchain_core.messages import BaseMessage
@@ -135,9 +136,19 @@ def create_conversation():
 
 @app.get("/conversations")
 def list_conversations():
-    """List all conversation IDs with summaries."""
+    """List all conversation IDs with summaries, most recent first."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute("SELECT conversation_id, messages FROM conversations ORDER BY updated_at DESC")
+        rows = cursor.fetchall()
+    except Exception:
+        rows = []
+    finally:
+        conn.close()
+
     summary_list = []
-    for conv_id, messages in _conversations.items():
+    for conv_id, msgs_raw in rows:
+        messages = json.loads(msgs_raw) if msgs_raw else []
         last_query = ""
         last_intent = "general_answer"
         msg_count = len(messages)
@@ -293,7 +304,7 @@ async def chat_stream(request: ChatRequest):
                             # Yield the response as a token event
                             yield f"event: token\ndata: {json.dumps({'text': response})}\n\n"
                         if update is not None and "final_docs" in update and update["final_docs"]:
-                            yield f"event: sources\ndata: {json.dumps({'sources': update['final_docs']})}\n\n"
+                            yield f"event: sources\ndata: {json.dumps({'sources': format_sources_for_ui(update['final_docs'])})}\n\n"
                         if update is not None and "intent" in update:
                             yield f"event: intent\ndata: {json.dumps({'intent': update['intent']})}\n\n"
                 elif isinstance(chunk, tuple) and len(chunk) == 2:
@@ -304,7 +315,7 @@ async def chat_stream(request: ChatRequest):
                         response_text = response if isinstance(response, str) else str(response or "")
                         yield f"event: token\ndata: {json.dumps({'text': response})}\n\n"
                     if update is not None and "final_docs" in update and update["final_docs"]:
-                        yield f"event: sources\ndata: {json.dumps({'sources': update['final_docs']})}\n\n"
+                        yield f"event: sources\ndata: {json.dumps({'sources': format_sources_for_ui(update['final_docs'])})}\n\n"
                     if update is not None and "intent" in update:
                         yield f"event: intent\ndata: {json.dumps({'intent': update['intent']})}\n\n"
 

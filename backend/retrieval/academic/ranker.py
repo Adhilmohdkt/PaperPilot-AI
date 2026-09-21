@@ -207,23 +207,23 @@ def _paper_text_tokens(
 def _year_score(
     year: int | None,
     current_year: int | None = None,
+    recency_requested: bool = False,
 ) -> float:
-    """Return a deterministic recency score between 0.5 and 1.0."""
+    """Return a deterministic recency score between 0.1 and 1.0."""
 
     if current_year is None:
         current_year = datetime.now().year
 
     if year is None:
-        return 0.5
+        return 0.3 if recency_requested else 0.5
 
     age = max(0, current_year - year)
 
     if age >= RECENCY_WINDOW_YEARS:
-        return 0.5
+        return 0.1 if recency_requested else 0.5
 
-    return 1.0 - (
-        age / RECENCY_WINDOW_YEARS
-    ) * 0.5
+    decay = (age / RECENCY_WINDOW_YEARS) * (0.9 if recency_requested else 0.5)
+    return max(0.1, 1.0 - decay)
 
 
 # ---------------------------------------------------------------------------
@@ -427,11 +427,16 @@ def _rank_papers(
     query: str,
     papers: List[AcademicPaper],
     top_k: int = 10,
+    recency_requested: bool = False,
 ) -> List[AcademicPaper]:
     """Rank papers using deterministic relevance signals."""
 
     if not papers:
         return []
+
+    lexical_w = 0.50 if recency_requested else LEXICAL_WEIGHT
+    recency_w = 0.45 if recency_requested else RECENCY_WEIGHT
+    citation_w = 0.05 if recency_requested else CITATION_WEIGHT
 
     scored: List[
         tuple[AcademicPaper, float, float]
@@ -445,7 +450,8 @@ def _rank_papers(
         )
 
         recency = _year_score(
-            paper.year
+            paper.year,
+            recency_requested=recency_requested,
         )
 
         citation = _citation_score(
@@ -453,9 +459,9 @@ def _rank_papers(
         )
 
         composite = (
-            LEXICAL_WEIGHT * lexical
-            + RECENCY_WEIGHT * recency
-            + CITATION_WEIGHT * citation
+            lexical_w * lexical
+            + recency_w * recency
+            + citation_w * citation
         )
 
         scored.append(
@@ -510,6 +516,7 @@ def normalize_and_rank(
     query: str,
     papers: List[AcademicPaper],
     top_k: int = 5,
+    recency_requested: bool = False,
 ) -> List[AcademicPaper]:
     """Deduplicate, rank, and return the top academic papers."""
 
@@ -526,6 +533,7 @@ def normalize_and_rank(
         query,
         deduped,
         top_k=top_k,
+        recency_requested=recency_requested,
     )
 
     return ranked

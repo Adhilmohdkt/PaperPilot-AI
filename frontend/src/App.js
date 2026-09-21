@@ -1,7 +1,26 @@
 import React, { useRef, useState, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import "./App.css";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
+
+const HISTORY_TURNS = 2;
+const HISTORY_ANSWER_CHARS = 1000;
+
+export function sourceHref(source) {
+  const candidates = [source.url, source.pdf_url, source.paper_url, source.source];
+  return candidates.find((value) => typeof value === "string" && /^https?:\/\//.test(value)) || "";
+}
+
+export function sourceLabel(source) {
+  return source.title || source.source || "Untitled source";
+}
+
+export function sourceSnippet(source) {
+  return source.text || source.abstract || "";
+}
 
 // ─── Backend helpers ─────────────────────────────────────────────────────────
 
@@ -117,12 +136,11 @@ function App() {
         await refreshConversations();
       }
 
-      // Build context from the current in-memory history (last 4 turns)
       const chatContext = priorHistory
-        .slice(-4)
+        .slice(-HISTORY_TURNS)
         .flatMap((item) => [
           { role: "user", content: item.query },
-          { role: "assistant", content: item.answer || "" },
+          { role: "assistant", content: (item.answer || "").slice(0, HISTORY_ANSWER_CHARS) },
         ]);
 
       const payload = {
@@ -262,17 +280,6 @@ function App() {
         <button
           className="new-chat-btn"
           onClick={startNewChat}
-          style={{
-            marginBottom: "12px",
-            width: "100%",
-            padding: "8px 0",
-            cursor: "pointer",
-            borderRadius: "6px",
-            border: "1px solid rgba(255,255,255,0.3)",
-            background: "rgba(255,255,255,0.1)",
-            color: "inherit",
-            fontSize: "14px",
-          }}
         >
           + New Chat
         </button>
@@ -299,8 +306,11 @@ function App() {
                 key={conv.conversation_id}
                 className={`history-item${conv.conversation_id === conversationId ? " active" : ""}`}
                 onClick={() => loadConversation(conv.conversation_id)}
+                title={conv.last_query || "New conversation"}
               >
-                {conv.last_query || "New conversation"}
+                <span className="history-item-text">
+                  {conv.last_query || "New conversation"}
+                </span>
               </button>
             ))
           ) : (
@@ -346,7 +356,26 @@ function App() {
                     {isLoading && turnIndex === history.length - 1 && !turn.answer ? (
                       <div className="thinking-indicator">Searching papers and synthesizing evidence...</div>
                     ) : (
-                      <div className="ai-answer">{turn.answer}</div>
+                      <div className="ai-answer markdown-body">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeRaw]}
+                          components={{
+                            a: ({ node, children, ...props }) => (
+                              <a {...props} target="_blank" rel="noopener noreferrer">
+                                {children}
+                              </a>
+                            ),
+                            table: ({ node, children, ...props }) => (
+                              <div className="table-wrapper">
+                                <table {...props}>{children}</table>
+                              </div>
+                            ),
+                          }}
+                        >
+                          {turn.answer}
+                        </ReactMarkdown>
+                      </div>
                     )}
                   </div>
                   {turn.sources?.length > 0 && !(isLoading && turnIndex === history.length - 1) && (
@@ -354,21 +383,23 @@ function App() {
                   <div className="sources-title">Source materials used</div>
                   <div className="sources-grid">
                     {turn.sources.map((source, index) => {
-                      const live = /^https?:\/\//.test(source.source || "");
+                      const href = sourceHref(source);
+                      const label = sourceLabel(source);
+                      const academic = source.kind === "academic" || Boolean(href);
                       return (
                         <div className="source-card" key={index}>
                           <div className="source-actions">
-                            {live ? (
-                              <a href={source.source} target="_blank" rel="noreferrer" className="source-badge">
-                                {source.kind === "academic" ? "Paper" : "Live"}: {source.title || source.source}
+                            {href ? (
+                              <a href={href} target="_blank" rel="noreferrer" className="source-badge">
+                                {academic ? "Paper" : "Live"}: {label}
                               </a>
                             ) : (
                               <span className="source-badge">
-                                PDF: {source.source || "Unknown"}{source.page ? ` · page ${source.page}` : ""}
+                                PDF: {label}{source.page ? ` · page ${source.page}` : ""}
                               </span>
                             )}
                           </div>
-                          <div className="source-text">{source.text}</div>
+                          <div className="source-text">{sourceSnippet(source)}</div>
                         </div>
                       );
                     })}

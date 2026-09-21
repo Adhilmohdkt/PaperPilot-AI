@@ -1,101 +1,156 @@
 # PaperPilot AI 🚀
 
-PaperPilot AI is a production-ready, full-stack **Retrieval-Augmented Generation (RAG)** application designed to serve as a highly intelligent, interactive Research Assistant. 
-
-It allows users to upload PDF research papers and ask complex questions about them. The system responds with high-quality synthesized answers and provides inline source citations, ensuring transparency and accuracy.
+PaperPilot AI is an advanced, production-grade **Agentic AI Research Assistant** built with **LangGraph**, **FastAPI**, and **React**. It seamlessly unifies **Local Document RAG** with **Live Academic Literature Discovery** (arXiv & OpenAlex), delivering grounded, verified research answers with precise citation attribution.
 
 ---
 
-## 🏗️ Overall Architecture
+## 🌟 Key Capabilities
 
-The application is built on a decoupled, microservice-inspired architecture using **Docker Compose** to orchestrate three main services:
+- 🤖 **Agentic Multi-Step Workflow (LangGraph)**:
+  - **Query Understanding**: Automatic classification of user intent (`academic_research`, `local_rag`, `general_answer`), topic extraction, and recency detection.
+  - **Dynamic Routing**: Conditionally routes requests between local vector knowledge bases, external academic paper providers, or conversational synthesis.
+  - **Deterministic Ranking & Recency Scoring**: Balances lexical relevance, publication year decay, and citation count to surface the most pertinent and latest (2024–2026) research.
+  - **Citation Validation**: Grounded citation tracking distinguishing between user-uploaded papers (`[Source N]`) and external academic literature (`[Paper N]`).
 
-1. **Frontend Application**: A responsive, interactive user interface that streams AI responses in real-time.
-2. **Backend Engine**: A high-performance Python API that handles file ingestion, advanced hybrid retrieval, and LLM text generation.
-3. **Vector Database**: A local instance of Weaviate that securely stores and indexes document chunks for semantic search.
+- 📚 **Live Academic Discovery (arXiv & OpenAlex)**:
+  - Searches millions of open-access papers in real time.
+  - Automatically fetches metadata, abstracts, DOIs, and direct PDF links without permanently cluttering local vector storage.
 
-### The Pipeline Flow
+- 📑 **Credit-Safe Local Document RAG**:
+  - Ingests uploaded PDF papers using PyMuPDF and creates semantic embeddings.
+  - Hybrid retrieval (BM25 keyword search + Dense Vector Search via Weaviate) with reranking to eliminate hallucinations.
+  - Guardrails on document size, chunk count, and page limits to ensure fast, cost-effective vector search.
 
-1. **Ingestion (`POST /upload`)**: 
-   When a PDF is uploaded, the backend reads it using `PyMuPDF`, cleans the text, and chunks it into manageable pieces. Each chunk is passed through a local `Sentence-Transformers` model to generate mathematical embeddings. Both the text (for keyword search) and vectors (for semantic search) are inserted into Weaviate.
-
-2. **Hybrid Retrieval (`POST /retrieve`)**: 
-   When a query is asked, the backend converts the query to a vector. It queries Weaviate using a **Hybrid Search** approach (BM25 + vector search) to fetch the top 15 most relevant chunks. It also respects the `source_filter` if a specific document is targeted.
-
-3. **Reranking**:
-   The initial chunks are passed to the **Cohere Reranker** (v3.0), which acts as a precision filter. It re-orders the chunks and selects the top 5 most contextually relevant pieces of text to reduce AI hallucinations.
-
-4. **Generation & Streaming (`POST /stream`)**: 
-   The retrieved chunks and the user's conversational history are packaged into a well-crafted prompt. This prompt is sent to the LLM (Llama 3.1 via Groq) which acts as the synthesis engine. The generator outputs text token-by-token directly to the frontend using **Server-Sent Events (SSE)**.
-
----
-
-## 💻 Tech Stack
-
-### Frontend (User Interface)
-- **Framework**: React.js 
-- **Styling**: Vanilla CSS featuring a premium, "Glassmorphism" design system (blurred panels, vibrant gradients).
-- **Communication**: Native `fetch` API for REST calls and `ReadableStream` for parsing continuous Server-Sent Events (SSE).
-
-### Backend (Retrieval & Generation)
-- **Framework**: FastAPI (Python) & Uvicorn (ASGI web server).
-- **Extraction**: `PyMuPDF` (fitz) for reliable text extraction from complex PDFs.
-- **Embeddings Model**: `sentence-transformers` (`all-MiniLM-L6-v2`) running locally for fast, privacy-first vector generation.
-- **Generation Model**: `Groq` API running `llama-3.1-8b-instant` for blisteringly fast token generation.
-- **Reranker Engine**: `Cohere` API (`rerank-english-v3.0`) for boosting search accuracy.
-
-### Storage & Infrastructure
-- **Vector Database**: Weaviate `v1.37.0` (Dockerized). Supports exact keyword match (BM25) and semantic vector search in a single hybrid query.
-- **Orchestration**: `docker-compose` managing network bridges and volume mounts.
-- **Web Server (Frontend)**: `Nginx` (Alpine) serving static React build files.
-
-### Evaluation & Testing
-- **Framework**: `ragas` (Retrieval-Augmented Generation Assessment).
-- **Purpose**: An automated script (`evaluate.py`) that scores the pipeline on metrics such as *Faithfulness*, *Context Precision*, and *Answer Relevancy* to ensure the architecture doesn't degrade over time.
+- 💻 **Modern React UI**:
+  - Real-time Server-Sent Events (SSE) token streaming.
+  - Full GitHub-Flavored Markdown (GFM) rendering with rich dark-mode tables, blockquotes, code blocks, and structured lists.
+  - Persistent conversation management (SQLite backed) with newest-first sidebar ordering.
+  - Document focus selector allowing users to target queries to specific uploaded papers.
 
 ---
 
-## ✨ Core Features
+## 🏗️ Architecture & Pipeline Flow
 
-* **Dynamic Document Uploading**: Directly drag and drop PDFs into the UI to ingest new knowledge instantly.
-* **Query Focus (Document Filtering)**: Seamlessly toggle between searching your *entire* knowledge base or locking the AI's attention onto a single, specific research paper to avoid context bleeding.
-* **Real-time Token Streaming**: Get instant gratification with ChatGPT-like streaming answers utilizing blazing-fast Llama-3 models.
-* **Inline PDF Citations**: Every generated answer is paired with a list of the exact document chunks it read to form its logic, complete with clickable links to download or view the unedited PDF.
-* **Conversational Memory**: The system remembers your previous chat interactions within a session, allowing for natural follow-up questions.
+```
+                                 ┌─────────────────────────┐
+                                 │   User Query / Web UI   │
+                                 └────────────┬────────────┘
+                                              │ (SSE Stream)
+                                 ┌────────────▼────────────┐
+                                 │   Query Understanding   │
+                                 │   & Intent Classifier   │
+                                 └────────────┬────────────┘
+                                              │
+                      ┌───────────────────────┼───────────────────────┐
+                      ▼                       ▼                       ▼
+            ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+            │  Academic Search │    │    Local RAG     │    │  General Answer  │
+            │ (arXiv/OpenAlex) │    │(Weaviate Hybrid) │    │  (Conversational)│
+            └─────────┬────────┘    └─────────┬────────┘    └─────────┬────────┘
+                      │                       │                       │
+            ┌─────────▼────────┐    ┌─────────▼────────┐              │
+            │  Normalize/Rank  │    │ Relevance Check  │              │
+            │  (Recency Boost) │    └─────────┬────────┘              │
+            └─────────┬────────┘              │                       │
+                      │                       │                       │
+                      └───────────────────────┼───────────────────────┘
+                                              ▼
+                                 ┌─────────────────────────┐
+                                 │     LLM Generation      │
+                                 │    (Groq / Llama 3)     │
+                                 └────────────┬────────────┘
+                                              │
+                                 ┌────────────▼────────────┐
+                                 │   Citation Validation   │
+                                 └────────────┬────────────┘
+                                              │
+                                 ┌────────────▼────────────┐
+                                 │   Streaming Output UI   │
+                                 └─────────────────────────┘
+```
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+- **Framework**: React 19
+- **Markdown & Tables**: `react-markdown`, `remark-gfm`, `rehype-raw`
+- **Styling**: Modern dark-mode Glassmorphism CSS design system
+- **Communication**: Native `fetch` with `ReadableStream` for real-time SSE
+
+### Backend & Agent Workflow
+- **Framework**: FastAPI, Uvicorn, Pydantic v2
+- **Agent Orchestration**: LangGraph, LangChain Core
+- **LLM Inference**: Groq API (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `llama-3.1`)
+- **Academic Search**: Official `arxiv` client, OpenAlex REST API
+- **Document Processing**: PyMuPDF (`fitz`), Sentence-Transformers
+- **Vector Database**: Weaviate (BM25 + Semantic Hybrid Search)
+- **Persistence**: SQLite conversation store
 
 ---
 
 ## 🚀 Getting Started
 
-To spin up the entire application:
+### Prerequisites
+- Python 3.10+
+- Node.js 18+ and npm
+- Docker Desktop (for Weaviate vector database)
+- Groq API Key
 
-1. Ensure you have Docker Desktop running.
-2. In the root directory, run:
+### 1. Vector Database Setup
+Run Weaviate using Docker Compose:
 ```bash
-docker-compose up --build
-```
-3. Once the terminal indicates that Uvicorn and Weaviate are running, open your browser and navigate to **http://localhost:3000**.
-4. Upload a document using the left sidebar and start researching!
-
-## Credit-safe paper library
-
-PaperPilot keeps the library intentionally small so embedding costs stay predictable.
-PDF files are used only during upload and then discarded; Weaviate stores the resulting
-semantic chunks. By default, the backend accepts at most **5 PDFs**, **25 pages per PDF**,
-and **40 chunks per PDF**. Duplicate uploads are rejected before any embedding API request.
-
-These optional `backend/.env` values adjust the guardrails:
-
-```env
-MAX_LIBRARY_DOCUMENTS=5
-MAX_PDF_PAGES=25
-MAX_CHUNKS_PER_DOCUMENT=40
-MAX_CHARS_PER_PAGE=12000
-GEMINI_MODEL=gemini-3.6-flash
-GEMINI_EMBEDDING_MODEL=models/gemini-embedding-2
+docker-compose up -d weaviate
 ```
 
-Use **Remove paper** in the document selector to delete a paper's stored vectors and free
-space for another upload. When indexed evidence is insufficient, LangGraph performs a live
-search across academic sources and cites those temporary results without adding their PDFs
-or vectors to the library.
+### 2. Backend Setup
+```bash
+cd backend
+
+# Create and activate virtual environment
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment variables
+# Create a .env file in backend/ with:
+# GROQ_API_KEY=your_groq_api_key_here
+# WEAVIATE_URL=http://localhost:8080
+
+# Start the FastAPI server
+python -m uvicorn main:app --reload --port 8000
+```
+
+### 3. Frontend Setup
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start the development server
+npm start
+```
+Open your browser at **http://localhost:3000**.
+
+---
+
+## 🧪 Testing
+
+Run backend structural and workflow tests:
+```bash
+cd backend
+python -m pytest tests/structural
+```
+
+---
+
+## 📄 License
+
+MIT License. Designed and built for transparent, reproducible academic research.
