@@ -26,6 +26,8 @@ from langchain_core.messages import (
 )
 from langchain_groq import ChatGroq
 
+from config import settings
+
 # Stay under Groq's 8k TPM / small-payload models on follow-up turns.
 MAX_HISTORY_MESSAGES = 4
 MAX_MESSAGE_CHARS = 1000
@@ -147,7 +149,7 @@ async def generate_answer(
         paper_content_texts = []
 
     model = ChatGroq(
-        model_name="openai/gpt-oss-20b",
+        model_name=settings.groq_generation_model,
         temperature=0.2,
     )
 

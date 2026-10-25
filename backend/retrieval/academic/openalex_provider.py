@@ -30,6 +30,50 @@ OPEN_ALEX_DEFAULT_PER_PAGE = 100
 # to avoid unnecessarily large responses.
 OPEN_ALEX_MAX_PER_REQUEST = 200
 
+# Polite-pool email — joining the polite pool improves rate limits.
+# Override via the OPENALEX_EMAIL environment variable in production.
+import os as _os
+_POLITE_EMAIL: str = _os.getenv("OPENALEX_EMAIL", "paperpilot@example.com")
+
+
+# ---------------------------------------------------------------------------
+# Query sanitizer
+# ---------------------------------------------------------------------------
+
+# Compiled patterns for arXiv-style field prefixes that cause HTTP 400 on
+# the OpenAlex search endpoint.  E.g. 'ti:"Attention is all you need"',
+# 'abs:transformer', 'au:Vaswani'.
+_ARXIV_FIELD_PREFIX_RE = re.compile(
+    r'\b(?:ti|abs|au|cat|id|jr|rn|submittedDate|lastUpdatedDate):'
+    r'(?:"[^"]*"|\S+)',
+    re.IGNORECASE,
+)
+
+
+def _sanitize_openalex_query(raw: str) -> str:
+    """Strip arXiv field-prefix syntax from *raw* before sending to OpenAlex.
+
+    OpenAlex's ``search`` parameter uses full-text search across work titles,
+    abstracts, and author names — it does not understand ``field:value``
+    syntax.  Passing arXiv-style prefixes such as ``ti:"..."`` results in an
+    HTTP 400 response.
+
+    This function:
+    1. Removes all recognised arXiv field-prefix tokens.
+    2. Strips leftover Boolean operators that would become dangling.
+    3. Collapses excess whitespace.
+    """
+    cleaned = _ARXIV_FIELD_PREFIX_RE.sub("", raw)
+
+    # Remove leftover Boolean connectives sitting at start/end or doubled.
+    cleaned = re.sub(r'\s+(AND|OR|NOT)\s+(AND|OR|NOT)\s+', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^\s*(AND|OR|NOT)\s+', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+(AND|OR|NOT)\s*$', '', cleaned, flags=re.IGNORECASE)
+
+    # Collapse excess whitespace.
+    cleaned = " ".join(cleaned.split())
+    return cleaned or raw  # if everything was stripped, fall back to original
+
 
 # ---------------------------------------------------------------------------
 # OpenAlex API request
@@ -45,11 +89,19 @@ async def _fetch_openalex_json(
     indexed fields. PaperPilot uses a bounded result set.
     """
 
+    # Sanitize query before encoding — removes arXiv field-prefix syntax
+    # that would otherwise cause HTTP 400 "Bad Request" errors.
+    safe_query = _sanitize_openalex_query(query)
+    if safe_query != query:
+        logger.debug(
+            "OpenAlex query sanitized: %r → %r", query, safe_query
+        )
+
     params: list[str] = []
 
     # Search across OpenAlex's indexed work fields.
     params.append(
-        f"search={quote_plus(query)}"
+        f"search={quote_plus(safe_query)}"
     )
 
     # Limit results.
@@ -76,9 +128,10 @@ async def _fetch_openalex_json(
             request = urllib_request.Request(
                 url,
                 headers={
+                    # Polite-pool User-Agent: mailto address qualifies this
+                    # client for OpenAlex's higher-tier rate limits.
                     "User-Agent": (
-                        "PaperPilot-AI/1.0 "
-                        "(academic research client)"
+                        f"PaperPilot-AI/1.0 (mailto:{_POLITE_EMAIL})"
                     )
                 },
             )

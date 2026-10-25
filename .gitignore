@@ -36,9 +36,10 @@ build/
 Data/
 !Data/sample.pdf
 
-# IDE
+# IDE & Evaluators
 .vscode/
 .idea/
 *.swp
 *.swo
+.deepeval/
 

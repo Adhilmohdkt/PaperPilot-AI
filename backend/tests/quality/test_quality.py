@@ -26,6 +26,7 @@ sys.path.insert(0, r'C:\Users\ASUS\Desktop\PaperPilot AI\backend')
 from generation.workflow import workflow
 from generation.nodes import academic_search_node, query_understanding_node, router_node, generate_node, relevance_check_node
 from generation.state import create_initial_state, AgentState
+from groq_deepeval_wrapper import get_groq_llm
 
 
 # ──────────────────────────────────────────────
@@ -122,11 +123,12 @@ def run_deepeval_quality_evaluation(test_cases: list) -> dict:
             retrieval_context=eval_data["contexts"],
         )
 
-        # Initialize metrics
+        # Initialize metrics using Groq LLM wrapper
+        eval_llm = get_groq_llm()
         metrics = [
-            AnswerRelevancyMetric(),
-            FaithfulnessMetric(),
-            ContextualRelevancyMetric(),
+            AnswerRelevancyMetric(model=eval_llm),
+            FaithfulnessMetric(model=eval_llm),
+            ContextualRelevancyMetric(model=eval_llm),
         ]
 
         # Run each metric and collect scores

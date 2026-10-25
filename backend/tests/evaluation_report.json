@@ -1,0 +1,796 @@
+{
+  "timestamp": "2026-10-25T11:49:37Z",
+  "structural": {
+    "total_checks": 60,
+    "passed_checks": 59,
+    "failed_checks": 1,
+    "accuracy": 0.9833333333333333,
+    "checks": [
+      {
+        "case": "casual_conversation",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "general_answer",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "casual_conversation",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "chat",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "casual_conversation",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search', 'local_retrieve']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "casual_conversation",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "casual_conversation",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "66 chars",
+        "root_cause": null
+      },
+      {
+        "case": "casual_conversation",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "0 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "general_knowledge",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "general_answer",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "general_knowledge",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "chat",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "general_knowledge",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search', 'local_retrieve']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "general_knowledge",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "general_knowledge",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "35 chars",
+        "root_cause": null
+      },
+      {
+        "case": "general_knowledge",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "0 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "general_technical",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "general_answer",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "general_technical",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "chat",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "general_technical",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search', 'local_retrieve']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "general_technical",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "general_technical",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "5485 chars",
+        "root_cause": null
+      },
+      {
+        "case": "general_technical",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "0 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_query",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "local_rag",
+        "actual": "local_rag",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_query",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "local_rag",
+        "actual": "local_rag",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_query",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_query",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_query",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "3468 chars",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_query",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "12 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_retrieval",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "local_rag",
+        "actual": "local_rag",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_retrieval",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "local_rag",
+        "actual": "local_rag",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_retrieval",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_retrieval",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_retrieval",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "2858 chars",
+        "root_cause": null
+      },
+      {
+        "case": "local_rag_retrieval",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "7 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "academic_research",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "academic_research",
+        "actual": "academic_research",
+        "root_cause": null
+      },
+      {
+        "case": "academic_research",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "academic_research",
+        "actual": "academic_research",
+        "root_cause": null
+      },
+      {
+        "case": "academic_research",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of []",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "academic_research",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of ['academic_search']",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "academic_research",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "2176 chars",
+        "root_cause": null
+      },
+      {
+        "case": "academic_research",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "5 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "recent_academic_research",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "academic_research",
+        "actual": "academic_research",
+        "root_cause": null
+      },
+      {
+        "case": "recent_academic_research",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "academic_research",
+        "actual": "academic_research",
+        "root_cause": null
+      },
+      {
+        "case": "recent_academic_research",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of []",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "recent_academic_research",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of ['academic_search']",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "recent_academic_research",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": false,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "0 chars",
+        "root_cause": "Generator produced empty response or error (provider/API or code issue)"
+      },
+      {
+        "case": "recent_academic_research",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "0 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "paper_methodology_question",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "local_rag",
+        "actual": "local_rag",
+        "root_cause": null
+      },
+      {
+        "case": "paper_methodology_question",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "local_rag",
+        "actual": "local_rag",
+        "root_cause": null
+      },
+      {
+        "case": "paper_methodology_question",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "paper_methodology_question",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "paper_methodology_question",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "2236 chars",
+        "root_cause": null
+      },
+      {
+        "case": "paper_methodology_question",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "6 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "insufficient_local_evidence",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "academic_research",
+        "actual": "academic_research",
+        "root_cause": null
+      },
+      {
+        "case": "insufficient_local_evidence",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "academic_research",
+        "actual": "academic_research",
+        "root_cause": null
+      },
+      {
+        "case": "insufficient_local_evidence",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['local_retrieve_with_evidence']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "insufficient_local_evidence",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of ['academic_search']",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "insufficient_local_evidence",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "1174 chars",
+        "root_cause": null
+      },
+      {
+        "case": "insufficient_local_evidence",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "2 citations recorded, bracket detected=False",
+        "root_cause": null
+      },
+      {
+        "case": "multi_turn_followup",
+        "category": "Routing",
+        "check": "Intent Classification",
+        "passed": true,
+        "expected": "general_answer",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "multi_turn_followup",
+        "category": "Routing",
+        "check": "Route Selection",
+        "passed": true,
+        "expected": "chat",
+        "actual": "general_answer",
+        "root_cause": null
+      },
+      {
+        "case": "multi_turn_followup",
+        "category": "Node Execution",
+        "check": "Prohibited Nodes Not Triggered",
+        "passed": true,
+        "expected": "None of ['academic_search', 'local_retrieve']",
+        "actual": "None",
+        "root_cause": null
+      },
+      {
+        "case": "multi_turn_followup",
+        "category": "Node Execution",
+        "check": "Required Nodes Triggered",
+        "passed": true,
+        "expected": "All of []",
+        "actual": "All triggered",
+        "root_cause": null
+      },
+      {
+        "case": "multi_turn_followup",
+        "category": "Generation",
+        "check": "Response Generation & Length",
+        "passed": true,
+        "expected": "Non-empty string >= 20 chars",
+        "actual": "196 chars",
+        "root_cause": null
+      },
+      {
+        "case": "multi_turn_followup",
+        "category": "Citations",
+        "check": "Citation Integrity & Grounding",
+        "passed": true,
+        "expected": "Citations validated or cleanly grounded",
+        "actual": "0 citations recorded, bracket detected=False",
+        "root_cause": null
+      }
+    ]
+  },
+  "local_retrieval": {
+    "total_queries": 10,
+    "hit_at_5": 1.0,
+    "recall_at_5": 0.8333333333333334,
+    "hits": 10,
+    "details": [
+      {
+        "query": "attention mechanisms and transformers",
+        "expected_papers": [
+          "attention_is_all_you_need.pdf",
+          "efficient_transformers_survey.pdf",
+          "sample.pdf"
+        ],
+        "retrieved_sources": [
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf"
+        ],
+        "matching_sources": [
+          "efficient_transformers_survey.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 0.3333333333333333
+      },
+      {
+        "query": "multimodal large language models survey",
+        "expected_papers": [
+          "efficient_multimodal_llm_survey.pdf",
+          "multimodal_llm_survey.pdf"
+        ],
+        "retrieved_sources": [
+          "efficient_multimodal_llm_survey.pdf",
+          "multimodal_llm_survey.pdf",
+          "efficient_multimodal_llm_survey.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "multimodal_llm_survey.pdf"
+        ],
+        "matching_sources": [
+          "efficient_multimodal_llm_survey.pdf",
+          "multimodal_llm_survey.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      },
+      {
+        "query": "RAG retriever augmented generation evaluation",
+        "expected_papers": [
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "retrieved_sources": [
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "matching_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      },
+      {
+        "query": "What do the uploaded papers say about RAG evaluation?",
+        "expected_papers": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf"
+        ],
+        "retrieved_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf"
+        ],
+        "matching_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      },
+      {
+        "query": "What are the key challenges mentioned in the local papers?",
+        "expected_papers": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_multimodal_llm_survey.pdf"
+        ],
+        "retrieved_sources": [
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "llm_evaluation_survey.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "efficient_multimodal_llm_survey.pdf"
+        ],
+        "matching_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "efficient_multimodal_llm_survey.pdf",
+          "efficient_transformers_survey.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      },
+      {
+        "query": "What methodology do the uploaded papers use for RAG evaluation?",
+        "expected_papers": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "llm_evaluation_survey.pdf"
+        ],
+        "retrieved_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "Blended RAG  Improving RAG  Retriever Augmented Generation  Accuracy with Semantic Search and Hybrid Query Based Retrievers.pdf"
+        ],
+        "matching_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 0.5
+      },
+      {
+        "query": "autoregressive retrieval augmentation for image generation",
+        "expected_papers": [
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf"
+        ],
+        "retrieved_sources": [
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf"
+        ],
+        "matching_sources": [
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      },
+      {
+        "query": "benchmarking multi-hop queries in retrieval augmented generation",
+        "expected_papers": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "retrieved_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "matching_sources": [
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      },
+      {
+        "query": "efficient self-attention mechanisms and sparse transformers",
+        "expected_papers": [
+          "efficient_transformers_survey.pdf",
+          "attention_is_all_you_need.pdf"
+        ],
+        "retrieved_sources": [
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf",
+          "efficient_transformers_survey.pdf"
+        ],
+        "matching_sources": [
+          "efficient_transformers_survey.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 0.5
+      },
+      {
+        "query": "large language model evaluation survey and benchmarks",
+        "expected_papers": [
+          "llm_evaluation_survey.pdf"
+        ],
+        "retrieved_sources": [
+          "llm_evaluation_survey.pdf",
+          "AR RAG  Autoregressive Retrieval Augmentation for Image Generation.pdf",
+          "llm_evaluation_survey.pdf",
+          "multimodal_llm_survey.pdf",
+          "MultiHop RAG  Benchmarking Retrieval Augmented Generation for Multi Hop Queries.pdf"
+        ],
+        "matching_sources": [
+          "llm_evaluation_survey.pdf"
+        ],
+        "is_hit": true,
+        "recall_at_5": 1.0
+      }
+    ]
+  },
+  "academic_retrieval": {
+    "total_queries": 5,
+    "hit_at_5": 1.0,
+    "recall_at_5": 1.0,
+    "hits": 5
+  },
+  "deepeval": {
+    "individual_cases": [
+      {
+        "name": "general_technical",
+        "query": "Explain how transformer attention mechanisms work",
+        "scores": {
+          "Answer Relevancy": 1.0,
+          "Faithfulness": 1.0,
+          "Contextual Relevancy": 0.0
+        }
+      },
+      {
+        "name": "local_rag_query",
+        "query": "What do the uploaded papers say about RAG evaluation?",
+        "scores": {
+          "Answer Relevancy": 1.0,
+          "Faithfulness": 0.0,
+          "Contextual Relevancy": 0.5714285714285714
+        }
+      },
+      {
+        "name": "academic_research",
+        "query": "Find recent papers about RAG evaluation",
+        "scores": {
+          "Answer Relevancy": 1.0,
+          "Faithfulness": 1.0,
+          "Contextual Relevancy": 0.0
+        }
+      }
+    ],
+    "average_scores": {
+      "Answer Relevancy": 1.0,
+      "Faithfulness": 0.6666666666666666,
+      "Contextual Relevancy": 0.19047619047619047
+    },
+    "overall_average": 0.6190476190476191
+  }
+}

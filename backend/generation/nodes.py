@@ -17,13 +17,15 @@ from langchain_groq import ChatGroq
 
 from .state import AgentState
 from .routing import route_after_relevance
+from config import settings
 
-# Groq LLM configuration - read API key from environment
-# Uses the GROQ_API_KEY already configured in .env
+# Groq LLM configuration — model ID centralised in config.Settings.
+# Override at runtime with the GROQ_ROUTER_MODEL env variable.
 _llm = ChatGroq(
-    model_name="openai/gpt-oss-120b",
+    model_name=settings.groq_router_model,
     temperature=0.2,
 )
+
 class QueryUnderstanding(BaseModel):
     """Structured interpretation of a PaperPilot user query."""
 
@@ -130,11 +132,12 @@ Use local_rag ONLY when the user explicitly asks about information
 contained in their uploaded/local documents, PDFs, papers, or library.
 
 Examples of explicit local references:
-- my uploaded paper
-- my PDF
-- my documents
-- my library
-- the paper I uploaded
+- my uploaded paper / uploaded papers
+- my PDF / local PDFs
+- my documents / local documents
+- my library / local library
+- the paper I uploaded / the uploaded papers
+- local papers / the local papers
 - documents in my library
 
 C. general_answer
@@ -146,6 +149,7 @@ Use general_answer for:
 - how/why questions
 - general technical questions
 - casual conversation
+- follow-up questions in an ongoing conversation (e.g. "tell me more about the first paper you mentioned", "expand on the previous point", "what do you mean by that?")
 - questions that do not request external academic research
 - questions that do not explicitly refer to the user's local documents
 
@@ -499,6 +503,10 @@ USER QUERY
             "my library",
             "uploaded",
             "local library",
+            "local paper",
+            "local papers",
+            "uploaded paper",
+            "uploaded papers",
         )
 
         academic_patterns = (
@@ -514,7 +522,9 @@ USER QUERY
             "academic",
         )
 
-        if any(pattern in normalized for pattern in local_patterns):
+        if re.search(r"\b(first|second|third|previous|earlier)\s+paper\b", normalized) or "tell me more" in normalized:
+            intent = "general_answer"
+        elif any(pattern in normalized for pattern in local_patterns):
             intent = "local_rag"
         elif any(pattern in normalized for pattern in academic_patterns):
             intent = "academic_research"
@@ -913,8 +923,6 @@ async def paper_content_node(state: AgentState) -> Dict[str, Any]:
             "paper_content_texts": []
         }
 
-    paper_content_texts: List[Dict[str, Any]] = []
-
     # Only inspect the top two ranked papers.
     # This keeps PDF retrieval bounded and avoids unnecessary downloads.
     papers_with_pdf = [
@@ -923,36 +931,57 @@ async def paper_content_node(state: AgentState) -> Dict[str, Any]:
         if getattr(paper, "pdf_url", None)
     ][:2]
 
-    for paper in papers_with_pdf:
+    # ------------------------------------------------------------------
+    # Concurrent PDF download (Fix 4).
+    # Previously downloads ran sequentially, so two papers with a 10 s
+    # timeout each could block for ~20 s total. asyncio.gather halves
+    # that worst-case to ~10 s.  return_exceptions=True means a single
+    # download failure never aborts the sibling task.
+    # ------------------------------------------------------------------
+
+    async def _safe_fetch(paper):
+        """Fetch one paper context; return None on any error."""
         try:
-            context = await fetch_paper_context(
+            return paper, await fetch_paper_context(
                 paper=paper,
                 query=query,
                 max_chunks=3,
             )
+        except Exception:
+            return paper, None
 
-            if not context:
-                continue
+    results = await asyncio.gather(
+        *[_safe_fetch(p) for p in papers_with_pdf],
+        return_exceptions=True,
+    )
 
-            paper_content_texts.append(
-                {
-                    "title": paper.title,
-                    "authors": paper.authors,
-                    "year": paper.year,
-                    "publication_date": paper.publication_date,
-                    "paper_url": paper.paper_url,
-                    "pdf_url": paper.pdf_url,
-                    "doi": paper.doi,
-                    "arxiv_id": paper.arxiv_id,
-                    "openalex_id": paper.openalex_id,
-                    "content": context,
-                }
-            )
+    paper_content_texts: List[Dict[str, Any]] = []
 
-        except Exception as exc:
-            # A failure for one paper must not stop the entire
-            # academic research workflow.
+    for result in results:
+        # asyncio.gather with return_exceptions=True may give an
+        # Exception object instead of a tuple on unexpected errors.
+        if isinstance(result, Exception):
             continue
+
+        paper, context = result
+
+        if not context:
+            continue
+
+        paper_content_texts.append(
+            {
+                "title": paper.title,
+                "authors": paper.authors,
+                "year": paper.year,
+                "publication_date": paper.publication_date,
+                "paper_url": paper.paper_url,
+                "pdf_url": paper.pdf_url,
+                "doi": paper.doi,
+                "arxiv_id": paper.arxiv_id,
+                "openalex_id": paper.openalex_id,
+                "content": context,
+            }
+        )
 
     return {
         "paper_content_texts": paper_content_texts

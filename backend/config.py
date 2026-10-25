@@ -22,7 +22,7 @@ class Settings:
     # ------------------------------------------------------------------
     collection_name: str = os.getenv(
         "WEAVIATE_COLLECTION",
-        "PaperChunk",
+        "PaperChunk_v2",
     )
 
     hybrid_alpha: float = float(
@@ -39,7 +39,7 @@ class Settings:
 
     embedding_model: str = os.getenv(
         "EMBEDDING_MODEL",
-        "gemini-embedding-2",
+        "all-MiniLM-L6-v2",
     )
 
     cohere_rerank_model: str = os.getenv(
@@ -77,7 +77,7 @@ class Settings:
         os.getenv("MIN_RELEVANT_DOCS", "2")
     )
 
-        # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # LangSmith
     # ------------------------------------------------------------------
     langsmith_tracing: bool = (
@@ -109,8 +109,10 @@ class Settings:
         os.getenv("ACADEMIC_PDF_MAX", "2")
     )
 
+    # Reduced from 30 s to 10 s — avoids blocking the academic path on
+    # slow or absent PDF hosts; upstream callers already handle failures.
     academic_pdf_timeout: int = int(
-        os.getenv("ACADEMIC_PDF_TIMEOUT", "30")
+        os.getenv("ACADEMIC_PDF_TIMEOUT", "10")
     )
 
     academic_pdf_max_size: int = int(
@@ -122,6 +124,40 @@ class Settings:
 
     academic_api_timeout: int = int(
         os.getenv("ACADEMIC_API_TIMEOUT", "15")
+    )
+
+    # ------------------------------------------------------------------
+    # Model registry — single source of truth for all Groq model IDs.
+    # Update here; nodes.py / generator.py / groq_deepeval_wrapper.py
+    # all import from settings instead of using literal strings.
+    # ------------------------------------------------------------------
+    groq_router_model: str = os.getenv(
+        "GROQ_ROUTER_MODEL",
+        "openai/gpt-oss-120b",
+    )
+
+    groq_generation_model: str = os.getenv(
+        "GROQ_GENERATION_MODEL",
+        "openai/gpt-oss-20b",
+    )
+
+    groq_eval_model: str = os.getenv(
+        "GROQ_EVAL_MODEL",
+        "openai/gpt-oss-120b",
+    )
+
+    # ------------------------------------------------------------------
+    # Local corpus fallback (used when Weaviate is offline / empty)
+    # ------------------------------------------------------------------
+    local_corpus_fallback_enabled: bool = (
+        os.getenv("LOCAL_CORPUS_FALLBACK", "true").lower() == "true"
+    )
+
+    # Absolute path override; if blank, runtime code resolves it
+    # relative to the project root (../../Data).
+    local_corpus_path: str = os.getenv(
+        "LOCAL_CORPUS_PATH",
+        "",
     )
 
 
